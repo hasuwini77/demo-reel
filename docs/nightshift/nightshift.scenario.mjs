@@ -22,12 +22,17 @@ const mixtapeDropPoint = async (page) => {
 export default {
     size: "1920x1080",
     fps: 60,
-    theme: { captionPosition: "bottom", haloFill: "rgba(255, 201, 163, .30)", haloStroke: "rgba(255, 201, 163, .9)" },
+    theme: {
+        captionPosition: "bottom",
+        haloFill: "rgba(255, 201, 163, .30)",
+        haloStroke: "rgba(255, 201, 163, .9)",
+        badgeTop: 116, // clear of Nightshift's own top-right tempo/vinyl widget
+    },
 
     async run(d) {
         const { page } = d;
         await d.open(app, { settle: 1200 });
-        d.badge("NIGHTSHIFT", "#FFC9A3");
+        d.badge("DEMO", "#FFC9A3");
         d.caption("A late-night mixtape studio");
         await d.hold(1800);
 
