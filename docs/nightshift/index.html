@@ -1,0 +1,649 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nightshift — a lo-fi mixtape studio</title>
+<meta name="description" content="Nightshift: a late-night lo-fi mixtape studio. Queue tracks, tag them, drag them into a mixtape and export.">
+<style>
+  :root {
+    --bg: #0c0d29;
+    --panel: #14163A;
+    --panel-2: #1b1e4c;
+    --line: #2a2d63;
+    --blue: #3B3F8F;
+    --lilac: #C98FB5;
+    --peach: #FFC9A3;
+    --text: #EDEBFA;
+    --muted: #9295c9;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Courier New", monospace;
+    --fs-sm: clamp(13px, 0.55vw + 10px, 16px);
+    --fs-base: clamp(16px, 0.7vw + 12px, 20px);
+    --fs-lg: clamp(26px, 1.5vw + 16px, 36px);
+    --fw-regular: 400;
+    --fw-medium: 500;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    font: var(--fw-regular) var(--fs-base)/1.5 var(--sans);
+    color: var(--text);
+    background:
+      radial-gradient(900px 480px at 85% -10%, rgba(255, 201, 163, .10), transparent 60%),
+      radial-gradient(700px 420px at 8% 105%, rgba(201, 143, 181, .12), transparent 60%),
+      var(--bg);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  button { font: inherit; color: inherit; }
+  ::selection { background: rgba(255, 201, 163, .3); }
+
+  /* ---------- topbar ---------- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: clamp(22px, 2.6vh, 34px) clamp(24px, 3vw, 48px);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: var(--fs-lg); letter-spacing: .04em; }
+  .brand-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--peach); box-shadow: 0 0 14px 2px rgba(255, 201, 163, .55); }
+  .brand-sub { display: block; font-size: var(--fs-sm); color: var(--muted); letter-spacing: .1em; margin-top: 2px; }
+  .brand-text { display: flex; flex-direction: column; }
+
+  .transport-status { display: flex; align-items: center; gap: 18px; }
+  .vinyl { width: clamp(40px, 3vh, 56px); height: clamp(40px, 3vh, 56px); border-radius: 50%; position: relative; flex: none;
+    background:
+      repeating-radial-gradient(circle at center, #05061a 0 1px, #101235 1px, #101235 3px, #05061a 3px, #05061a 4px);
+    border: 1px solid var(--line);
+    animation: spin 3.6s linear infinite;
+    animation-play-state: paused;
+  }
+  .vinyl::after { content: ""; position: absolute; inset: 41%; border-radius: 50%; background: var(--peach); }
+  body.is-playing .vinyl { animation-play-state: running; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .bpm { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); text-align: right; }
+  .bpm strong { display: block; color: var(--text); font-size: var(--fs-base); font-weight: var(--fw-medium); }
+
+  /* ---------- layout ---------- */
+  .layout {
+    display: grid;
+    grid-template-columns: clamp(300px, 22vw, 400px) 1fr clamp(320px, 24vw, 440px);
+    align-content: center;
+    gap: clamp(20px, 2vw, 36px);
+    padding: clamp(24px, 4vh, 56px) clamp(24px, 3vw, 56px);
+    max-width: 1680px;
+    min-height: calc(100vh - 110px - 64px);
+    margin: 0 auto;
+  }
+  section { min-width: 0; }
+  h2 { font-size: var(--fs-sm); font-weight: var(--fw-medium); text-transform: uppercase; letter-spacing: .12em; color: var(--muted); margin: 0 0 14px; }
+
+  /* ---------- library ---------- */
+  .tracks { list-style: none; margin: 0; padding: 0; display: grid; gap: clamp(8px, 1.4vh, 16px); }
+  .track {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: clamp(18px, 2.6vh, 30px) clamp(16px, 1.4vw, 22px); cursor: grab; user-select: none;
+    transition: border-color .2s, background .2s, transform .15s;
+  }
+  .track:hover { border-color: var(--lilac); }
+  .track:focus-visible { outline: 2px solid var(--peach); outline-offset: 2px; }
+  .track.is-current { border-color: var(--peach); background: var(--panel-2); }
+  .track.is-dragging { opacity: .35; }
+  .track-handle { color: var(--muted); font-size: 14px; line-height: 1; flex: none; }
+  .track-meta { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+  .track-name { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .track-artist { font-size: var(--fs-sm); color: var(--muted); }
+  .track-len { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); flex: none; }
+
+  /* ---------- now playing ---------- */
+  .now-playing { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: clamp(28px, 4vh, 48px); }
+  .np-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: clamp(18px, 2.4vh, 28px); }
+  .np-name { font-family: var(--mono); font-size: var(--fs-lg); margin: 0; }
+  .np-artist { font-size: var(--fs-base); color: var(--muted); margin: 6px 0 0; }
+  .play-btn {
+    width: clamp(52px, 4.4vh, 68px); height: clamp(52px, 4.4vh, 68px); border-radius: 50%; border: 1px solid var(--line);
+    background: var(--panel-2); color: var(--peach); cursor: pointer; flex: none;
+    display: flex; align-items: center; justify-content: center; font-size: clamp(18px, 1.6vh, 24px);
+    transition: background .2s, transform .15s, box-shadow .2s;
+  }
+  .play-btn:hover { transform: scale(1.05); }
+  .play-btn[aria-pressed="true"] { background: var(--peach); color: #191333; box-shadow: 0 0 24px rgba(255, 201, 163, .45); }
+
+  canvas#waveform { width: 100%; height: clamp(220px, 34vh, 420px); display: block; border-radius: 10px; background: var(--panel-2); }
+
+  .scrub { position: relative; height: 6px; border-radius: 999px; background: var(--line); margin: clamp(24px, 3.2vh, 40px) 0 clamp(28px, 3.6vh, 44px); cursor: pointer; }
+  .scrub-fill { position: absolute; inset: 0; width: 0%; border-radius: 999px; background: linear-gradient(90deg, var(--blue), var(--peach)); }
+  .scrub-handle { position: absolute; top: 50%; left: 0%; width: 14px; height: 14px; border-radius: 50%; background: var(--peach);
+    transform: translate(-50%, -50%); box-shadow: 0 0 0 4px rgba(255, 201, 163, .18); }
+
+  .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: clamp(14px, 2vh, 22px); min-height: 30px; }
+  .tag {
+    font-size: var(--fs-sm); color: var(--lilac); background: rgba(201, 143, 181, .12);
+    border: 1px solid rgba(201, 143, 181, .35); border-radius: 999px; padding: clamp(5px, .8vh, 8px) 14px;
+    animation: tag-in .3s ease both;
+  }
+  @keyframes tag-in { from { opacity: 0; transform: translateY(4px) scale(.9); } }
+
+  .tag-add { display: flex; gap: 10px; }
+  .tag-add input {
+    flex: 1; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: clamp(9px, 1.4vh, 14px) 14px; color: var(--text); font: inherit; font-size: var(--fs-sm);
+  }
+  .tag-add input:focus { outline: 2px solid var(--lilac); outline-offset: -1px; }
+  .tag-add button {
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    border-radius: 8px; padding: 0 18px; cursor: pointer; transition: border-color .2s; font-size: var(--fs-sm);
+  }
+  .tag-add button:hover { border-color: var(--lilac); }
+
+  /* ---------- mixtape ---------- */
+  .mixtape {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: clamp(24px, 3.2vh, 36px);
+    display: flex; flex-direction: column; min-height: clamp(420px, 62vh, 760px); transition: border-color .2s, background .2s;
+  }
+  .mixtape.is-drop-target { border-color: var(--peach); }
+
+  .mixtape-empty {
+    flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px;
+    border: 1px dashed var(--line); border-radius: 12px; padding: 24px; text-align: center;
+    color: var(--muted); transition: border-color .2s, background .2s, color .2s;
+  }
+  .mixtape-empty[hidden] { display: none; }
+  .mixtape.is-drop-target .mixtape-empty { border-color: var(--peach); background: var(--panel-2); color: var(--peach); }
+  .mixtape-empty-icon {
+    width: 44px; height: 44px; border-radius: 50%; border: 1px solid currentColor;
+    display: flex; align-items: center; justify-content: center; font-size: 20px; opacity: .75;
+  }
+  .mixtape-empty p { margin: 0; font-size: var(--fs-sm); }
+
+  .mixtape-list { list-style: none; margin: 0 0 14px; padding: 0; display: grid; gap: clamp(8px, 1.2vh, 12px); flex: 1; align-content: start; }
+  .mixtape-row {
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: clamp(10px, 1.6vh, 16px) 14px;
+    animation: drop-in .35s cubic-bezier(.2, .8, .3, 1) both;
+  }
+  @keyframes drop-in { from { opacity: 0; transform: translateY(-10px) scale(.96); } }
+  .mixtape-row .row-handle { color: var(--muted); font-size: 12px; flex: none; }
+  .mixtape-row .row-meta { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+  .mixtape-row .row-name { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .mixtape-row .row-artist { font-size: 12px; color: var(--muted); }
+  .mixtape-row .row-len { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); flex: none; }
+  .mixtape-row .row-remove {
+    flex: none; width: 24px; height: 24px; border-radius: 50%; border: 1px solid var(--line);
+    background: transparent; color: var(--muted); cursor: pointer; font-size: 13px; line-height: 1;
+    display: flex; align-items: center; justify-content: center; transition: border-color .2s, color .2s;
+  }
+  .mixtape-row .row-remove:hover { border-color: var(--peach); color: var(--peach); }
+
+  .mixtape-total { font-family: var(--mono); font-size: 12px; color: var(--muted); margin: 0 0 14px; letter-spacing: .02em; }
+
+  .export-btn {
+    border: 1px solid var(--peach); background: transparent; color: var(--peach);
+    border-radius: 10px; padding: clamp(12px, 1.8vh, 16px); cursor: pointer; font-weight: var(--fw-medium);
+    font-size: var(--fs-sm);
+    transition: background .2s, color .2s;
+  }
+  .export-btn:hover:not(:disabled) { background: var(--peach); color: #191333; }
+  .export-btn:disabled { opacity: .4; cursor: not-allowed; }
+  .export-progress { height: 4px; border-radius: 999px; background: var(--line); margin-top: 10px; overflow: hidden; }
+  .export-progress[hidden] { display: none; }
+  .export-bar { height: 100%; width: 0%; background: var(--peach); }
+
+  /* ---------- drag ghost ---------- */
+  .drag-ghost {
+    position: fixed; z-index: 40; pointer-events: none;
+    background: var(--panel-2); border: 1px solid var(--peach); border-radius: 10px;
+    padding: 10px 14px; font-family: var(--mono); font-size: var(--fs-sm); color: var(--text);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .45);
+    transform: translate(-50%, -50%);
+  }
+
+  /* ---------- toast ---------- */
+  .toast {
+    position: fixed; left: 50%; bottom: 172px; transform: translate(-50%, 12px);
+    display: flex; align-items: center; gap: 10px;
+    background: var(--panel-2); border: 1px solid var(--peach); color: var(--text);
+    padding: 16px 28px; border-radius: 999px; font-size: var(--fs-base); font-weight: var(--fw-medium);
+    box-shadow: 0 14px 34px rgba(0, 0, 0, .4);
+    opacity: 0; transition: opacity .3s ease, transform .3s ease; pointer-events: none;
+    z-index: 20;
+  }
+  .toast::before {
+    content: "✓"; display: flex; align-items: center; justify-content: center;
+    width: 22px; height: 22px; border-radius: 50%; background: var(--peach); color: #191333;
+    font-size: 13px; flex: none;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+  .ambient {
+    position: fixed; left: 0; right: 0; bottom: 0; height: 64px;
+    border-top: 1px solid var(--line);
+    background: rgba(12, 13, 41, .6);
+    backdrop-filter: blur(6px);
+    z-index: 1;
+  }
+  .ambient canvas { width: 100%; height: 100%; display: block; }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; padding: 16px; gap: 16px; min-height: 0; }
+    .topbar { padding: 16px; }
+    .ambient { display: none; }
+    .mixtape { min-height: 320px; }
+    canvas#waveform { height: 180px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot" aria-hidden="true"></span>
+    <span class="brand-text">NIGHTSHIFT<span class="brand-sub">late-night mixtape studio</span></span>
+  </div>
+  <div class="transport-status">
+    <div class="bpm"><span>tempo</span><strong id="bpmValue">128 BPM</strong></div>
+    <div class="vinyl" id="vinyl" aria-hidden="true"></div>
+  </div>
+</header>
+
+<div class="layout">
+  <section class="library" aria-label="Track library">
+    <h2>Library</h2>
+    <ul class="tracks" id="trackList"></ul>
+  </section>
+
+  <section class="now-playing" aria-label="Now playing">
+    <div class="np-head">
+      <div>
+        <p class="np-name" id="npName">tape_03.wav</p>
+        <p class="np-artist" id="npArtist">@midnight.loops</p>
+      </div>
+      <button class="play-btn" id="playBtn" aria-pressed="false" aria-label="Play">▶</button>
+    </div>
+    <canvas id="waveform" role="img" aria-label="Track waveform"></canvas>
+    <div class="scrub" id="scrub" role="slider" aria-label="Playhead" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0"></div>
+    <div class="tags" id="tagList" aria-label="Tags"></div>
+    <form class="tag-add" id="tagForm">
+      <input type="text" id="tagInput" aria-label="Add tag" placeholder="Add tag…" autocomplete="off">
+      <button type="submit">Add tag</button>
+    </form>
+  </section>
+
+  <section class="mixtape" aria-label="Mixtape" id="mixtape">
+    <h2>Mixtape</h2>
+    <div class="mixtape-empty" id="mixtapeEmpty">
+      <span class="mixtape-empty-icon" aria-hidden="true">+</span>
+      <p>Drag a track here</p>
+    </div>
+    <ul class="mixtape-list" id="mixtapeList" aria-label="Mixtape queue" hidden></ul>
+    <p class="mixtape-total" id="mixtapeTotal" hidden></p>
+    <button class="export-btn" id="exportBtn" disabled aria-label="Export mixtape">Export mixtape</button>
+    <div class="export-progress" id="exportProgress" hidden>
+      <div class="export-bar" id="exportBar"></div>
+    </div>
+  </section>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<div class="ambient" aria-hidden="true"><canvas id="ambientCanvas"></canvas></div>
+
+<script>
+(() => {
+  const TRACKS = [
+    { id: "t1", name: "tape_03.wav", artist: "@midnight.loops", len: "3:41", tags: ["lofi", "night"] },
+    { id: "t2", name: "rainy_keys", artist: "@glasshouse", len: "2:58", tags: ["keys"] },
+    { id: "t3", name: "4am_bus", artist: "@driftwave", len: "4:12", tags: ["ambient"] },
+    { id: "t4", name: "soft_focus", artist: "@paper.moons", len: "3:05", tags: ["chill"] },
+    { id: "t5", name: "glass_static", artist: "@nocturnal.fm", len: "2:24", tags: ["texture"] },
+  ];
+
+  const $ = (sel) => document.querySelector(sel);
+  const trackList = $("#trackList");
+  const mixtape = $("#mixtape");
+  const mixtapeList = $("#mixtapeList");
+  const mixtapeEmpty = $("#mixtapeEmpty");
+  const mixtapeTotal = $("#mixtapeTotal");
+  const exportBtn = $("#exportBtn");
+  const exportProgress = $("#exportProgress");
+  const exportBar = $("#exportBar");
+  const playBtn = $("#playBtn");
+  const npName = $("#npName");
+  const npArtist = $("#npArtist");
+  const tagList = $("#tagList");
+  const tagForm = $("#tagForm");
+  const tagInput = $("#tagInput");
+  const scrub = $("#scrub");
+  const toast = $("#toast");
+  const canvas = $("#waveform");
+  const ctx = canvas.getContext("2d");
+
+  let current = TRACKS[0];
+  let playing = false;
+  let position = 0.12; // 0..1 playhead
+  let dragging = null;
+  let mixtapeTracks = [];
+
+  function lenToSeconds(len) {
+    const [m, s] = len.split(":").map(Number);
+    return m * 60 + s;
+  }
+  function secondsToLen(total) {
+    const m = Math.floor(total / 60);
+    const s = Math.round(total % 60);
+    return `${m}:${String(s).padStart(2, "0")}`;
+  }
+
+  // ---------- track list ----------
+  function renderTracks() {
+    trackList.innerHTML = "";
+    TRACKS.forEach((t) => {
+      const li = document.createElement("li");
+      li.className = "track" + (t.id === current.id ? " is-current" : "");
+      li.dataset.id = t.id;
+      li.setAttribute("role", "button");
+      li.setAttribute("tabindex", "0");
+      li.setAttribute("aria-label", `Play ${t.name} by ${t.artist}`);
+      li.innerHTML = `
+        <span class="track-handle" aria-hidden="true">⠿⠿</span>
+        <span class="track-meta">
+          <span class="track-name">${t.name}</span>
+          <span class="track-artist">${t.artist}</span>
+        </span>
+        <span class="track-len">${t.len}</span>`;
+      li.addEventListener("click", () => selectTrack(t, { autoplay: true }));
+      li.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTrack(t, { autoplay: true }); }
+      });
+      li.addEventListener("pointerdown", (e) => startDrag(e, t, li));
+      trackList.appendChild(li);
+    });
+  }
+
+  function selectTrack(t, { autoplay = false } = {}) {
+    current = t;
+    npName.textContent = t.name;
+    npArtist.textContent = t.artist;
+    renderTags();
+    renderTracks();
+    if (autoplay) setPlaying(true);
+  }
+
+  // ---------- drag to mixtape ----------
+  function startDrag(e, track, li) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const ghost = document.createElement("div");
+    ghost.className = "drag-ghost";
+    ghost.textContent = track.name;
+    ghost.style.left = e.clientX + "px";
+    ghost.style.top = e.clientY + "px";
+    document.body.appendChild(ghost);
+    li.classList.add("is-dragging");
+    dragging = { track, ghost, li };
+
+    const move = (ev) => {
+      if (!dragging) return;
+      ghost.style.left = ev.clientX + "px";
+      ghost.style.top = ev.clientY + "px";
+      const r = mixtape.getBoundingClientRect();
+      const over = ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+      mixtape.classList.toggle("is-drop-target", over);
+    };
+    const up = (ev) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (!dragging) return;
+      const r = mixtape.getBoundingClientRect();
+      const over = ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+      if (over) addToMixtape(dragging.track);
+      dragging.ghost.remove();
+      dragging.li.classList.remove("is-dragging");
+      mixtape.classList.remove("is-drop-target");
+      dragging = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  function addToMixtape(track) {
+    mixtapeTracks.push(track);
+    renderMixtape();
+  }
+
+  function removeFromMixtape(index) {
+    mixtapeTracks.splice(index, 1);
+    renderMixtape();
+  }
+
+  function renderMixtape() {
+    const has = mixtapeTracks.length > 0;
+    mixtapeEmpty.hidden = has;
+    mixtapeList.hidden = !has;
+    mixtapeTotal.hidden = !has;
+    exportBtn.disabled = !has;
+
+    mixtapeList.innerHTML = "";
+    mixtapeTracks.forEach((t, i) => {
+      const li = document.createElement("li");
+      li.className = "mixtape-row";
+      li.innerHTML = `
+        <span class="row-handle" aria-hidden="true">⠿⠿</span>
+        <span class="row-meta">
+          <span class="row-name">${t.name}</span>
+          <span class="row-artist">${t.artist}</span>
+        </span>
+        <span class="row-len">${t.len}</span>
+        <button type="button" class="row-remove" aria-label="Remove ${t.name} from mixtape">×</button>`;
+      li.querySelector(".row-remove").addEventListener("click", () => removeFromMixtape(i));
+      mixtapeList.appendChild(li);
+    });
+
+    if (has) {
+      const totalSeconds = mixtapeTracks.reduce((sum, t) => sum + lenToSeconds(t.len), 0);
+      const label = mixtapeTracks.length === 1 ? "track" : "tracks";
+      mixtapeTotal.textContent = `${mixtapeTracks.length} ${label} · ${secondsToLen(totalSeconds)}`;
+    }
+  }
+
+  // ---------- tags ----------
+  function renderTags() {
+    tagList.innerHTML = "";
+    current.tags.forEach((tag) => {
+      const span = document.createElement("span");
+      span.className = "tag";
+      span.textContent = tag;
+      tagList.appendChild(span);
+    });
+  }
+
+  tagForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const val = tagInput.value.trim().toLowerCase();
+    if (!val || current.tags.includes(val)) return;
+    current.tags.push(val);
+    renderTags();
+    tagInput.value = "";
+  });
+
+  // ---------- play / pause ----------
+  function setPlaying(next) {
+    playing = next;
+    playBtn.setAttribute("aria-pressed", String(playing));
+    playBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
+    playBtn.textContent = playing ? "❚❚" : "▶";
+    document.body.classList.toggle("is-playing", playing);
+  }
+  playBtn.addEventListener("click", () => setPlaying(!playing));
+
+  // ---------- scrub ----------
+  function setPosition(ratio) {
+    position = Math.min(1, Math.max(0, ratio));
+    scrub.style.setProperty("--p", position);
+    scrub.setAttribute("aria-valuenow", String(Math.round(position * 100)));
+  }
+  scrub.addEventListener("click", (e) => {
+    const r = scrub.getBoundingClientRect();
+    setPosition((e.clientX - r.left) / r.width);
+  });
+  // render fill/handle from position via inline styles each frame (see rAF loop)
+
+  // ---------- export ----------
+  exportBtn.addEventListener("click", () => {
+    if (exportBtn.disabled) return;
+    exportBtn.disabled = true;
+    exportProgress.hidden = false;
+    exportBar.style.width = "0%";
+    const start = performance.now();
+    const DUR = 1400;
+    function step(now) {
+      const t = Math.min(1, (now - start) / DUR);
+      exportBar.style.width = `${t * 100}%`;
+      if (t < 1) {
+        requestAnimationFrame(step);
+      } else {
+        exportProgress.hidden = true;
+        showToast("Mixtape exported");
+        exportBtn.disabled = mixtapeTracks.length === 0;
+      }
+    }
+    requestAnimationFrame(step);
+  });
+
+  let toastHideAt = null;
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add("show");
+    toastHideAt = performance.now() + 2600;
+  }
+
+  // ---------- waveform + scrub render loop ----------
+  const BARS = 72;
+  const seeds = Array.from({ length: BARS }, (_, i) => 0.25 + 0.75 * Math.abs(Math.sin(i * 12.9898)));
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.round(rect.width * (window.devicePixelRatio || 1));
+    canvas.height = Math.round(rect.height * (window.devicePixelRatio || 1));
+  }
+  window.addEventListener("resize", resizeCanvas);
+
+  function drawWave(t) {
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    const gap = w / BARS;
+    const barW = gap * 0.55;
+    for (let i = 0; i < BARS; i++) {
+      const base = seeds[i];
+      const wobble = playing ? Math.sin(t / 260 + i * 0.45) * 0.32 + Math.sin(t / 610 + i) * 0.15 : 0;
+      const amp = Math.max(0.06, Math.min(1, base + wobble));
+      const barH = amp * h * 0.86;
+      const x = i * gap + (gap - barW) / 2;
+      const y = (h - barH) / 2;
+      const playedX = position * w;
+      ctx.fillStyle = x < playedX
+        ? "rgba(255, 201, 163, 0.92)"
+        : "rgba(201, 143, 181, 0.35)";
+      ctx.beginPath();
+      const r = Math.min(barW / 2, 4);
+      roundRect(ctx, x, y, barW, barH, r);
+      ctx.fill();
+    }
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
+  function paintScrub() {
+    const fillPct = `${position * 100}%`;
+    scrub.style.background =
+      `linear-gradient(90deg, var(--blue), var(--peach) ${fillPct}, var(--line) ${fillPct})`;
+    let handle = scrub.querySelector(".scrub-handle-el");
+    if (!handle) {
+      handle = document.createElement("div");
+      handle.className = "scrub-handle scrub-handle-el";
+      scrub.appendChild(handle);
+    }
+    handle.style.left = fillPct;
+  }
+
+  let lastPos = null;
+  function loop(now) {
+    if (playing) {
+      if (lastPos === null) lastPos = now;
+      const dt = now - lastPos;
+      lastPos = now;
+      position += dt / 45000; // full sweep ~45s
+      if (position >= 1) position = 0;
+    } else {
+      lastPos = null;
+    }
+    drawWave(now);
+    paintScrub();
+    if (toastHideAt !== null && now >= toastHideAt) {
+      toast.classList.remove("show");
+      toastHideAt = null;
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- ambient bottom strip (always alive, even when paused) ----------
+  const ambientCanvas = $("#ambientCanvas");
+  const actx = ambientCanvas.getContext("2d");
+  const AMBIENT_BARS = 96;
+  const ambientSeeds = Array.from({ length: AMBIENT_BARS }, (_, i) => 0.2 + 0.8 * Math.abs(Math.sin(i * 7.233)));
+
+  function resizeAmbient() {
+    const rect = ambientCanvas.getBoundingClientRect();
+    ambientCanvas.width = Math.round(rect.width * (window.devicePixelRatio || 1));
+    ambientCanvas.height = Math.round(rect.height * (window.devicePixelRatio || 1));
+  }
+  window.addEventListener("resize", resizeAmbient);
+
+  function drawAmbient(t) {
+    const w = ambientCanvas.width, h = ambientCanvas.height;
+    actx.clearRect(0, 0, w, h);
+    const gap = w / AMBIENT_BARS;
+    const barW = gap * 0.5;
+    for (let i = 0; i < AMBIENT_BARS; i++) {
+      const base = ambientSeeds[i];
+      const speed = playing ? 1 : 0.35;
+      const wobble = Math.sin(t / 900 * speed + i * 0.5) * 0.4 + 0.5;
+      const amp = Math.max(0.05, base * wobble);
+      const barH = amp * h * 0.7;
+      const x = i * gap + (gap - barW) / 2;
+      const y = (h - barH) / 2;
+      actx.fillStyle = playing ? "rgba(255, 201, 163, 0.28)" : "rgba(59, 63, 143, 0.55)";
+      actx.fillRect(x, y, barW, barH);
+    }
+  }
+
+  function ambientLoop(now) {
+    drawAmbient(now);
+    requestAnimationFrame(ambientLoop);
+  }
+
+  // ---------- init ----------
+  resizeCanvas();
+  resizeAmbient();
+  renderTracks();
+  renderTags();
+  renderMixtape();
+  requestAnimationFrame(loop);
+  requestAnimationFrame(ambientLoop);
+})();
+</script>
+</body>
+</html>

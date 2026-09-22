@@ -1,5 +1,6 @@
 node_modules/
 *.mp4
 !docs/example.mp4
+!docs/nightshift.mp4
 *-sheet.png
 .playwright-mcp/
