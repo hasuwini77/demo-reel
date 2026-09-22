@@ -253,7 +253,310 @@
 <div class="ambient" aria-hidden="true"><canvas id="ambientCanvas"></canvas></div>
 
 <script>
-  // Interactions (playback, drag-to-mixtape, tags, export) land in the next commit.
+(() => {
+  const TRACKS = [
+    { id: "t1", name: "tape_03.wav", artist: "@midnight.loops", len: "3:41", tags: ["lofi", "night"] },
+    { id: "t2", name: "rainy_keys", artist: "@glasshouse", len: "2:58", tags: ["keys"] },
+    { id: "t3", name: "4am_bus", artist: "@driftwave", len: "4:12", tags: ["ambient"] },
+    { id: "t4", name: "soft_focus", artist: "@paper.moons", len: "3:05", tags: ["chill"] },
+    { id: "t5", name: "glass_static", artist: "@nocturnal.fm", len: "2:24", tags: ["texture"] },
+  ];
+
+  const $ = (sel) => document.querySelector(sel);
+  const trackList = $("#trackList");
+  const mixtape = $("#mixtape");
+  const mixtapeList = $("#mixtapeList");
+  const mixtapeHint = $("#mixtapeHint");
+  const exportBtn = $("#exportBtn");
+  const exportProgress = $("#exportProgress");
+  const exportBar = $("#exportBar");
+  const playBtn = $("#playBtn");
+  const npName = $("#npName");
+  const npArtist = $("#npArtist");
+  const tagList = $("#tagList");
+  const tagForm = $("#tagForm");
+  const tagInput = $("#tagInput");
+  const scrub = $("#scrub");
+  const toast = $("#toast");
+  const canvas = $("#waveform");
+  const ctx = canvas.getContext("2d");
+
+  let current = TRACKS[0];
+  let playing = false;
+  let position = 0.12; // 0..1 playhead
+  let dragging = null;
+
+  // ---------- track list ----------
+  function renderTracks() {
+    trackList.innerHTML = "";
+    TRACKS.forEach((t) => {
+      const li = document.createElement("li");
+      li.className = "track" + (t.id === current.id ? " is-current" : "");
+      li.dataset.id = t.id;
+      li.setAttribute("role", "button");
+      li.setAttribute("tabindex", "0");
+      li.setAttribute("aria-label", `Play ${t.name} by ${t.artist}`);
+      li.innerHTML = `
+        <span class="track-handle" aria-hidden="true">⠿⠿</span>
+        <span class="track-meta">
+          <span class="track-name">${t.name}</span>
+          <span class="track-artist">${t.artist}</span>
+        </span>
+        <span class="track-len">${t.len}</span>`;
+      li.addEventListener("click", () => selectTrack(t, { autoplay: true }));
+      li.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectTrack(t, { autoplay: true }); }
+      });
+      li.addEventListener("pointerdown", (e) => startDrag(e, t, li));
+      trackList.appendChild(li);
+    });
+  }
+
+  function selectTrack(t, { autoplay = false } = {}) {
+    current = t;
+    npName.textContent = t.name;
+    npArtist.textContent = t.artist;
+    renderTags();
+    renderTracks();
+    if (autoplay) setPlaying(true);
+  }
+
+  // ---------- drag to mixtape ----------
+  function startDrag(e, track, li) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const ghost = document.createElement("div");
+    ghost.className = "drag-ghost";
+    ghost.textContent = track.name;
+    ghost.style.left = e.clientX + "px";
+    ghost.style.top = e.clientY + "px";
+    document.body.appendChild(ghost);
+    li.classList.add("is-dragging");
+    dragging = { track, ghost, li };
+
+    const move = (ev) => {
+      if (!dragging) return;
+      ghost.style.left = ev.clientX + "px";
+      ghost.style.top = ev.clientY + "px";
+      const r = mixtape.getBoundingClientRect();
+      const over = ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+      mixtape.classList.toggle("is-drop-target", over);
+    };
+    const up = (ev) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      if (!dragging) return;
+      const r = mixtape.getBoundingClientRect();
+      const over = ev.clientX >= r.left && ev.clientX <= r.right && ev.clientY >= r.top && ev.clientY <= r.bottom;
+      if (over) addToMixtape(dragging.track);
+      dragging.ghost.remove();
+      dragging.li.classList.remove("is-dragging");
+      mixtape.classList.remove("is-drop-target");
+      dragging = null;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  function addToMixtape(track) {
+    mixtapeHint.hidden = true;
+    const li = document.createElement("li");
+    li.textContent = track.name;
+    mixtapeList.appendChild(li);
+    exportBtn.disabled = mixtapeList.children.length === 0;
+  }
+
+  // ---------- tags ----------
+  function renderTags() {
+    tagList.innerHTML = "";
+    current.tags.forEach((tag) => {
+      const span = document.createElement("span");
+      span.className = "tag";
+      span.textContent = tag;
+      tagList.appendChild(span);
+    });
+  }
+
+  tagForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const val = tagInput.value.trim().toLowerCase();
+    if (!val || current.tags.includes(val)) return;
+    current.tags.push(val);
+    renderTags();
+    tagInput.value = "";
+  });
+
+  // ---------- play / pause ----------
+  function setPlaying(next) {
+    playing = next;
+    playBtn.setAttribute("aria-pressed", String(playing));
+    playBtn.setAttribute("aria-label", playing ? "Pause" : "Play");
+    playBtn.textContent = playing ? "❚❚" : "▶";
+    document.body.classList.toggle("is-playing", playing);
+  }
+  playBtn.addEventListener("click", () => setPlaying(!playing));
+
+  // ---------- scrub ----------
+  function setPosition(ratio) {
+    position = Math.min(1, Math.max(0, ratio));
+    scrub.style.setProperty("--p", position);
+    scrub.setAttribute("aria-valuenow", String(Math.round(position * 100)));
+  }
+  scrub.addEventListener("click", (e) => {
+    const r = scrub.getBoundingClientRect();
+    setPosition((e.clientX - r.left) / r.width);
+  });
+  // render fill/handle from position via inline styles each frame (see rAF loop)
+
+  // ---------- export ----------
+  exportBtn.addEventListener("click", () => {
+    if (exportBtn.disabled) return;
+    exportBtn.disabled = true;
+    exportProgress.hidden = false;
+    exportBar.style.width = "0%";
+    const start = performance.now();
+    const DUR = 1400;
+    function step(now) {
+      const t = Math.min(1, (now - start) / DUR);
+      exportBar.style.width = `${t * 100}%`;
+      if (t < 1) {
+        requestAnimationFrame(step);
+      } else {
+        exportProgress.hidden = true;
+        showToast("Mixtape exported");
+        exportBtn.disabled = mixtapeList.children.length === 0;
+      }
+    }
+    requestAnimationFrame(step);
+  });
+
+  let toastHideAt = null;
+  function showToast(msg) {
+    toast.textContent = msg;
+    toast.classList.add("show");
+    toastHideAt = performance.now() + 2600;
+  }
+
+  // ---------- waveform + scrub render loop ----------
+  const BARS = 72;
+  const seeds = Array.from({ length: BARS }, (_, i) => 0.25 + 0.75 * Math.abs(Math.sin(i * 12.9898)));
+
+  function resizeCanvas() {
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.round(rect.width * (window.devicePixelRatio || 1));
+    canvas.height = Math.round(rect.height * (window.devicePixelRatio || 1));
+  }
+  window.addEventListener("resize", resizeCanvas);
+
+  function drawWave(t) {
+    const w = canvas.width, h = canvas.height;
+    ctx.clearRect(0, 0, w, h);
+    const gap = w / BARS;
+    const barW = gap * 0.55;
+    for (let i = 0; i < BARS; i++) {
+      const base = seeds[i];
+      const wobble = playing ? Math.sin(t / 260 + i * 0.45) * 0.32 + Math.sin(t / 610 + i) * 0.15 : 0;
+      const amp = Math.max(0.06, Math.min(1, base + wobble));
+      const barH = amp * h * 0.86;
+      const x = i * gap + (gap - barW) / 2;
+      const y = (h - barH) / 2;
+      const playedX = position * w;
+      ctx.fillStyle = x < playedX
+        ? "rgba(255, 201, 163, 0.92)"
+        : "rgba(201, 143, 181, 0.35)";
+      ctx.beginPath();
+      const r = Math.min(barW / 2, 4);
+      roundRect(ctx, x, y, barW, barH, r);
+      ctx.fill();
+    }
+  }
+
+  function roundRect(c, x, y, w, h, r) {
+    c.moveTo(x + r, y);
+    c.arcTo(x + w, y, x + w, y + h, r);
+    c.arcTo(x + w, y + h, x, y + h, r);
+    c.arcTo(x, y + h, x, y, r);
+    c.arcTo(x, y, x + w, y, r);
+    c.closePath();
+  }
+
+  function paintScrub() {
+    const fillPct = `${position * 100}%`;
+    scrub.style.background =
+      `linear-gradient(90deg, var(--blue), var(--peach) ${fillPct}, var(--line) ${fillPct})`;
+    let handle = scrub.querySelector(".scrub-handle-el");
+    if (!handle) {
+      handle = document.createElement("div");
+      handle.className = "scrub-handle scrub-handle-el";
+      scrub.appendChild(handle);
+    }
+    handle.style.left = fillPct;
+  }
+
+  let lastPos = null;
+  function loop(now) {
+    if (playing) {
+      if (lastPos === null) lastPos = now;
+      const dt = now - lastPos;
+      lastPos = now;
+      position += dt / 45000; // full sweep ~45s
+      if (position >= 1) position = 0;
+    } else {
+      lastPos = null;
+    }
+    drawWave(now);
+    paintScrub();
+    if (toastHideAt !== null && now >= toastHideAt) {
+      toast.classList.remove("show");
+      toastHideAt = null;
+    }
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- ambient bottom strip (always alive, even when paused) ----------
+  const ambientCanvas = $("#ambientCanvas");
+  const actx = ambientCanvas.getContext("2d");
+  const AMBIENT_BARS = 96;
+  const ambientSeeds = Array.from({ length: AMBIENT_BARS }, (_, i) => 0.2 + 0.8 * Math.abs(Math.sin(i * 7.233)));
+
+  function resizeAmbient() {
+    const rect = ambientCanvas.getBoundingClientRect();
+    ambientCanvas.width = Math.round(rect.width * (window.devicePixelRatio || 1));
+    ambientCanvas.height = Math.round(rect.height * (window.devicePixelRatio || 1));
+  }
+  window.addEventListener("resize", resizeAmbient);
+
+  function drawAmbient(t) {
+    const w = ambientCanvas.width, h = ambientCanvas.height;
+    actx.clearRect(0, 0, w, h);
+    const gap = w / AMBIENT_BARS;
+    const barW = gap * 0.5;
+    for (let i = 0; i < AMBIENT_BARS; i++) {
+      const base = ambientSeeds[i];
+      const speed = playing ? 1 : 0.35;
+      const wobble = Math.sin(t / 900 * speed + i * 0.5) * 0.4 + 0.5;
+      const amp = Math.max(0.05, base * wobble);
+      const barH = amp * h * 0.7;
+      const x = i * gap + (gap - barW) / 2;
+      const y = (h - barH) / 2;
+      actx.fillStyle = playing ? "rgba(255, 201, 163, 0.28)" : "rgba(59, 63, 143, 0.55)";
+      actx.fillRect(x, y, barW, barH);
+    }
+  }
+
+  function ambientLoop(now) {
+    drawAmbient(now);
+    requestAnimationFrame(ambientLoop);
+  }
+
+  // ---------- init ----------
+  resizeCanvas();
+  resizeAmbient();
+  renderTracks();
+  renderTags();
+  requestAnimationFrame(loop);
+  requestAnimationFrame(ambientLoop);
+})();
 </script>
 </body>
 </html>
