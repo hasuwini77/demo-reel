@@ -1,0 +1,12 @@
+{
+  "name": "demo-reel",
+  "private": true,
+  "type": "module",
+  "description": "Frame-exact 60 fps demo videos of any web app, recorded from a script.",
+  "scripts": {
+    "example": "node scripts/record.mjs examples/tasks.scenario.mjs --out examples/tasks.mp4"
+  },
+  "dependencies": {
+    "playwright": "^1.62.0"
+  }
+}

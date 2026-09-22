@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Tasks — demo-reel example</title>
+<style>
+  :root { --bg: #f6f7f9; --surface: #fff; --border: #e3e6eb; --text: #14171c; --muted: #6b7280; --accent: #4f46e5; --accent-bg: #eef2ff; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 20px/1.4 Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+  nav { background: var(--surface); border-right: 1px solid var(--border); padding: 24px 16px; }
+  nav h1 { font-size: 26px; margin: 0 0 24px; }
+  nav button { display: block; width: 100%; text-align: left; border: 0; background: none; padding: 10px 12px; border-radius: 8px; font: inherit; color: var(--muted); cursor: pointer; transition: background .2s, color .2s; }
+  nav button[aria-pressed="true"] { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+  main { padding: 40px 56px; overflow: hidden; position: relative; }
+  form { display: flex; gap: 10px; margin-bottom: 28px; max-width: 900px; }
+  input { flex: 1; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; font: inherit; }
+  input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  form button { padding: 0 20px; border: 0; border-radius: 10px; background: var(--accent); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  ul { list-style: none; margin: 0; padding: 0; max-width: 900px; display: grid; gap: 10px; }
+  li { display: flex; align-items: center; gap: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px; cursor: pointer;
+       animation: enter .35s ease both; transition: opacity .3s, border-color .2s; }
+  li:hover { border-color: var(--accent); }
+  li.done { opacity: .5; } li.done span { text-decoration: line-through; }
+  li input { flex: 0 0 22px; width: 22px; height: 22px; accent-color: var(--accent); }
+  @keyframes enter { from { opacity: 0; transform: translateY(8px); } }
+  aside { position: absolute; top: 0; right: 0; bottom: 0; width: 440px; background: var(--surface); border-left: 1px solid var(--border); padding: 40px 32px;
+          transform: translateX(100%); transition: transform .35s cubic-bezier(.2,.7,.3,1); }
+  aside.open { transform: none; }
+  aside h2 { margin: 0 0 8px; } aside p { color: var(--muted); }
+</style>
+</head>
+<body>
+<nav>
+  <h1>Tasks</h1>
+  <button data-filter="all" aria-pressed="true">All</button>
+  <button data-filter="open" aria-pressed="false">Open</button>
+  <button data-filter="done" aria-pressed="false">Done</button>
+</nav>
+<main>
+  <form><input placeholder="Add a task…" aria-label="New task"><button>Add</button></form>
+  <ul></ul>
+  <aside><h2></h2><p>Created just now. Click another task to switch, or press Esc.</p></aside>
+</main>
+<script>
+  const tasks = [{ t: "Draft the quarterly report", done: false }, { t: "Review pull requests", done: true }, { t: "Book the team offsite", done: false }];
+  let filter = "all";
+  const ul = document.querySelector("ul"), aside = document.querySelector("aside");
+  function render() {
+    ul.innerHTML = "";
+    tasks.filter((x) => filter === "all" || (filter === "done") === x.done).forEach((x) => {
+      const li = document.createElement("li");
+      li.className = x.done ? "done" : "";
+      li.innerHTML = `<input type="checkbox" ${x.done ? "checked" : ""} aria-label="Done"><span></span>`;
+      li.querySelector("span").textContent = x.t;
+      li.querySelector("input").addEventListener("click", (e) => { e.stopPropagation(); x.done = !x.done; render(); });
+      li.addEventListener("click", () => { aside.querySelector("h2").textContent = x.t; aside.classList.add("open"); });
+      ul.appendChild(li);
+    });
+  }
+  document.querySelector("form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const i = e.target.querySelector("input");
+    if (i.value.trim()) { tasks.unshift({ t: i.value.trim(), done: false }); i.value = ""; render(); }
+  });
+  document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+    filter = b.dataset.filter;
+    document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-pressed", x === b));
+    render();
+  }));
+  addEventListener("keydown", (e) => { if (e.key === "Escape") aside.classList.remove("open"); });
+  render();
+</script>
+</body>
+</html>

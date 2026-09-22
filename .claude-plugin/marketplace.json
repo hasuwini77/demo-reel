@@ -1,0 +1,20 @@
+{
+  "name": "demo-reel",
+  "owner": { "name": "hasuwini77" },
+  "metadata": {
+    "description": "Frame-exact 60 fps demo videos of any web app, recorded from a script.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "demo-reel",
+      "source": "./",
+      "description": "Record smooth, frame-exact 60 fps demo videos of any web app from a short script: cursor halo, click ripples, captions, before/after badges.",
+      "version": "0.1.0",
+      "author": { "name": "hasuwini77" },
+      "keywords": ["demo", "video", "screen-recording", "playwright", "walkthrough", "60fps"],
+      "category": "productivity",
+      "strict": false
+    }
+  ]
+}
