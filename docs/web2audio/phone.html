@@ -90,7 +90,7 @@
   .lib-row-voice { font-size: 12px; color: var(--w2a-ink-faint); }
 
   /* ───────────────────────── Player screen ───────────────────────── */
-  .player-screen { position: absolute; inset: 0; background: rgba(15,15,16,0.98); overflow-y: auto; transform: translateY(100%); transition: transform var(--w2a-duration-live) var(--w2a-ease-expo); z-index: 20; }
+  .player-screen { position: absolute; inset: 0; background: #0f0f10; overflow-y: auto; transform: translateY(100%); transition: transform var(--w2a-duration-live) var(--w2a-ease-expo); z-index: 20; }
   .player-screen.open { transform: translateY(0); }
   .grabber { width: 36px; height: 5px; border-radius: 3px; background: #3a3a3a; margin: 12px auto 0; }
 
@@ -240,7 +240,7 @@
 <script src="./assets/transport.js"></script>
 <script>
   (function () {
-    // Decorative fixed waveform, ported verbatim from PlayerView.swift's placeholder heights.
+    // Decorative fixed waveform, matching the shipping app's placeholder heights.
     const heights = [28, 42, 60, 50, 80, 70, 90, 60, 75, 55, 85, 65, 45, 70, 35];
     const bars = document.getElementById("p-bars");
     heights.forEach((h) => {
