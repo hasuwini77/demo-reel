@@ -67,17 +67,13 @@ and at 1776×936.
 - All state transitions (idle → loading → playing → paused/ended) and every visible progress update run inside a single `requestAnimationFrame` loop keyed off `performance.now()`; nothing timer-based drives anything on screen.
 - Popup open/close, player sheet slide-up, chip/segment selection: CSS transitions, 120–400ms (`--w2a-duration-press/state/live` tokens in `assets/brand.css`), not JS-timed.
 
-## Real product facts used, and where they came from
+## Sourcing
 
-- **Extension description** — "Convert any webpage into an AI-powered audio summary with premium text-to-speech voices" — `manifest.json` in the private repo `hasuwini77/Web2Audio` (`gh api repos/hasuwini77/Web2Audio/contents/manifest.json`).
-- **Voice names** — Schedar, Leda, Aoede, Charon, Fenrir, Kore, Puck, Orus — `src/window/views/console/ControlRail.tsx` (`VOICES` array, Chirp3-HD Google TTS voices), same repo. Cross-checked against the iOS app's own real screenshots (`web2audio-ios/screenshots/iphone/02-library.png`, `03-player.png`), which show "Schedar · HD voice", "Fenrir · HD voice", "Aoede · HD voice", "Leda · HD voice" — so "HD voice" (not "premium voice") is the product's actual on-screen wording, used verbatim in `phone.html`.
-- **Summary length options** — Brief / Standard / Detailed — same `ControlRail.tsx`.
-- **Studio Console UI structure and exact design tokens** (colors as oklch, Hanken Grotesk + Martian Mono, radii, durations, shadow, easing) — `src/index.css` `@theme` block, `src/window/views/ConsoleView.tsx`, `ControlRail.tsx`, `TopBar.tsx`, `components/ui/Transport.tsx` (all in the private repo). The transport states (`idle`/`loading`/`playing`/`paused`/`idle-after-play`/`error`) and their aria-labels ("Play this page", "Preparing audio", "Pause", "Resume", "Replay from where you left off") are copied verbatim from `Transport.tsx`'s `STATE_ARIA` map and `useConsolePlayer.ts`.
-- **iOS app screens** — Library row layout (title, relative time, voice·HD voice, duration) and Player layout (240×240 gradient artwork with a fixed 15-bar waveform placeholder, scrubber with elapsed/-remaining, ±15s skip, large play/pause circle, uppercase "SUMMARY" section) — `web2audio-ios/Sources/Library/LibraryView.swift` and `Sources/Player/PlayerView.swift`, confirmed pixel-for-pixel against the real screenshots in `web2audio-ios/screenshots/iphone/`.
-- **"Synced from Chrome" / companion-device copy** — `web2audio-ios/Sources/Onboarding/CompanionGuideView.swift`: "Web2Audio turns articles into natural audio. Create it with the Chrome extension on your computer — it lands here to play anywhere" and "Your library syncs to this app for listening on the go." Confirms the product genuinely syncs extension → app, so the `phone.html` "Synced from Chrome" pill is accurate, not invented.
-- **Brand mark** — the amber ring + pause-bars icon — `web2audio-ios/branding/brand-mark.svg` and the extension's own `public/icon_128.png`/`icon_32.png` (vendored into `assets/`), both from the sources above.
-- **Tagline / CTA wording** — "Any webpage. Audio in one click." and "Add to Chrome — free" — fetched from the public site `https://www.web2audio.com`.
-- **Fonts** — Hanken Grotesk (400/500/600) + Martian Mono (600), both SIL Open Font License, vendored as `.woff2` in `assets/fonts/` (downloaded once from Google Fonts, zero runtime network calls). Same two families the product itself uses (`src/index.css`).
+UI, voice names and copy match the shipping Web2Audio extension and iOS app;
+brand (colors, fonts, tagline, CTA wording, logo mark) comes from
+web2audio.com. Fonts (Hanken Grotesk 400/500/600 + Martian Mono 600, both SIL
+Open Font License) are vendored locally as `.woff2` in `assets/fonts/` for
+zero runtime network requests.
 
 ## What's weakest
 

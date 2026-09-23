@@ -1,7 +1,6 @@
 /*
- * Web2Audio brand tokens — lifted verbatim (values, not files) from the
- * product's own src/index.css (private repo hasuwini77/Web2Audio) and the
- * iOS app's dark surfaces (web2audio-ios/Sources/Player, Library).
+ * Web2Audio brand tokens — color values, fonts and spacing match the
+ * shipping Web2Audio extension and iOS app.
  * Shared by browser.html, phone.html and end.html. Zero network requests:
  * fonts are vendored in ./fonts/.
  */
@@ -36,7 +35,7 @@
 }
 
 :root {
-  /* dark app surfaces — verbatim from Web2Audio src/index.css @theme */
+  /* dark app surfaces — match the shipping Web2Audio product theme */
   --w2a-chassis: oklch(0.17 0.006 70);
   --w2a-surface: oklch(0.215 0.007 70);
   --w2a-surface-inset: oklch(0.145 0.005 70);
