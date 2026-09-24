@@ -121,10 +121,18 @@ function stepCamera(dt) {
     [cam.x, cam.vx] = spring(cam.x, cam.vx, cam.tx, s);
     [cam.y, cam.vy] = spring(cam.y, cam.vy, cam.ty, s);
     [cam.lz, cam.vz] = spring(cam.lz, cam.vz, cam.tlz, s);
+    // The spring only approaches its target, and every sub-pixel creep re-rasters
+    // the text at a new offset/scale, so letters shimmer long after the move looks
+    // done. Snap once it is within a pixel / 0.4 % of scale and nearly still.
+    if (Math.abs(cam.x - cam.tx) < 1 && Math.abs(cam.y - cam.ty) < 1 && Math.abs(cam.lz - cam.tlz) < 0.004
+        && Math.abs(cam.vx) + Math.abs(cam.vy) < 40 && Math.abs(cam.vz) < 0.05) {
+        cam.x = cam.tx; cam.y = cam.ty; cam.lz = cam.tlz; cam.vx = cam.vy = cam.vz = 0;
+    }
     const zoom = Math.exp(cam.lz);
     const w = W / zoom, h = H / zoom;
-    const x = Math.min(Math.max(cam.x - w / 2, 0), W - w);
-    const y = Math.min(Math.max(cam.y - h / 2, 0), H - h);
+    // Whole device pixels: a pan then shifts the raster instead of re-hinting glyphs.
+    const x = Math.round(Math.min(Math.max(cam.x - w / 2, 0), W - w) * zoom) / zoom;
+    const y = Math.round(Math.min(Math.max(cam.y - h / 2, 0), H - h) * zoom) / zoom;
     state.cam = { x, y, z: zoom };
 }
 
