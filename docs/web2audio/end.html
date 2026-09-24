@@ -26,15 +26,18 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 28px;
+    gap: 40px;
     background:
       radial-gradient(60% 50% at 50% 28%, oklch(0.76 0.17 65 / 0.10), transparent 70%),
       var(--w2a-chassis);
   }
 
+  /* Confident end-card scale: mark/title/tagline/domain ~1.8x the original
+     mock, buttons a more modest ~1.23x (52px -> 64px tall) so they stay
+     tappable-looking rather than oversized. */
   .mark {
-    width: 96px; height: 96px;
-    border-radius: 22px;
+    width: 173px; height: 173px;
+    border-radius: 40px;
     display: flex; align-items: center; justify-content: center;
   }
   .mark img { width: 100%; height: 100%; display: block; }
@@ -42,7 +45,7 @@
   .wordmark {
     font-family: var(--w2a-font-sans);
     font-weight: 600;
-    font-size: 34px;
+    font-size: 61px;
     letter-spacing: -0.01em;
     color: var(--w2a-ink);
     margin: 0;
@@ -51,36 +54,36 @@
   .value-prop {
     font-family: var(--w2a-font-sans);
     font-weight: 400;
-    font-size: 18px;
+    font-size: 32px;
     color: var(--w2a-ink-dim);
-    margin: -14px 0 6px;
+    margin: -22px 0 8px;
     text-align: center;
   }
 
   .cta-row {
     display: flex;
     align-items: center;
-    gap: 16px;
-    margin-top: 6px;
+    gap: 22px;
+    margin-top: 8px;
   }
 
   .btn-chrome {
-    display: flex; align-items: center; gap: 10px;
-    height: 52px; padding: 0 22px;
+    display: flex; align-items: center; gap: 13px;
+    height: 64px; padding: 0 28px;
     background: var(--w2a-live);
     color: #1a1206;
     border-radius: var(--w2a-radius-control);
     font-family: var(--w2a-font-sans);
     font-weight: 600;
-    font-size: 15px;
+    font-size: 19px;
     text-decoration: none;
     border: none;
   }
   .btn-chrome svg { flex-shrink: 0; }
 
   .badge-appstore {
-    display: flex; align-items: center; gap: 9px;
-    height: 52px; padding: 0 16px;
+    display: flex; align-items: center; gap: 12px;
+    height: 64px; padding: 0 20px;
     background: #000;
     color: #fff;
     border-radius: var(--w2a-radius-control);
@@ -90,14 +93,14 @@
   }
   .badge-appstore .apple-icon { flex-shrink: 0; }
   .badge-appstore .badge-text { display: flex; flex-direction: column; line-height: 1.15; }
-  .badge-appstore .badge-text .small { font-size: 10px; font-weight: 400; color: #cfcfcf; }
-  .badge-appstore .badge-text .big { font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .badge-appstore .badge-text .small { font-size: 12px; font-weight: 400; color: #cfcfcf; }
+  .badge-appstore .badge-text .big { font-size: 22px; font-weight: 600; letter-spacing: -0.01em; }
 
   .domain {
-    margin-top: 18px;
+    margin-top: 26px;
     font-family: var(--w2a-font-mono);
     font-weight: 600;
-    font-size: 14px;
+    font-size: 18px;
     letter-spacing: 0.02em;
     color: var(--w2a-ink-faint);
   }
@@ -113,7 +116,7 @@
 
     <div class="cta-row">
       <a class="btn-chrome" href="#" role="button" aria-label="Add to Chrome — free">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
           <circle cx="12" cy="12" r="9.5" stroke="#1a1206" stroke-width="1.6"/>
           <circle cx="12" cy="12" r="3.4" fill="#1a1206"/>
           <path d="M12 2.5V8.6" stroke="#1a1206" stroke-width="1.6" stroke-linecap="round"/>
@@ -124,7 +127,7 @@
       </a>
 
       <a class="badge-appstore" href="#" role="button" aria-label="Download on the App Store">
-        <svg class="apple-icon" width="22" height="26" viewBox="0 0 22 26" fill="#fff" aria-hidden="true">
+        <svg class="apple-icon" width="26" height="31" viewBox="0 0 22 26" fill="#fff" aria-hidden="true">
           <path d="M17.9 13.7c0-2.9 2.4-4.3 2.5-4.4-1.4-2-3.5-2.3-4.2-2.3-1.8-.2-3.5 1.1-4.4 1.1-.9 0-2.3-1-3.8-1-1.9 0-3.7 1.1-4.7 2.9-2 3.5-.5 8.7 1.5 11.5 1 1.4 2.1 2.9 3.6 2.9 1.5-.1 2-.9 3.8-.9 1.8 0 2.2.9 3.8.9 1.6 0 2.6-1.4 3.6-2.8 1.1-1.6 1.6-3.2 1.6-3.3-.1 0-3-1.2-3-4.6Z"/>
           <path d="M14.9 4.9c.8-1 1.4-2.4 1.2-3.9-1.2.05-2.7.8-3.6 1.9-.8.9-1.4 2.3-1.2 3.7 1.4.1 2.8-.7 3.6-1.7Z"/>
         </svg>
