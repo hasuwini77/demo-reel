@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Web2Audio — phone scene</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="./assets/brand.css" />
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    /* Same wallpaper as the browser clip's engine `frame.background`, so the
+       cut between clips flows (this scene records WITHOUT a frame, full
+       1920x1080, so the page itself carries the wallpaper). Keep this
+       string byte-for-byte identical to frame.background in
+       browser.scenario.mjs. */
+    background: radial-gradient(140% 100% at 50% -10%, oklch(0.76 0.17 65 / 0.16) 0%, oklch(0.4 0.1 55 / 0.06) 35%, transparent 65%), linear-gradient(160deg, oklch(0.19 0.01 60), oklch(0.1 0.006 70));
+    font-family: var(--w2a-font-sans);
+    overflow: hidden;
+  }
+  body.stage {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4vw;
+    padding: 0 6vw 0 8vw;
+  }
+
+  /* ───────────────────────── Promo copy (left) ───────────────────────── */
+  .promo-copy {
+    max-width: 620px;
+    flex-shrink: 0;
+  }
+  .promo-copy h1 {
+    margin: 0;
+    max-width: 560px;
+    font-family: var(--w2a-font-sans);
+    font-weight: 500; /* house rule: no bold — 500 is the heaviest weight here */
+    font-size: 52px;
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+    color: var(--w2a-ink);
+    text-wrap: balance;
+  }
+  .promo-copy p {
+    margin: 18px 0 0;
+    max-width: 380px;
+    font-family: var(--w2a-font-sans);
+    font-weight: 400;
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--w2a-ink-dim);
+  }
+
+  /* ───────────────────────── iPhone frame (right) ─────────────────────────
+     App-Store hero scale: ~88% of the 1080p frame height. `zoom` (Chromium-
+     supported) blows the whole native-sized subtree up uniformly, so every
+     fixed-px child below stays in proportion without being rewritten. */
+  .iphone {
+    width: 402px;
+    height: 874px;
+    zoom: 1.087;
+    background: #0a0a0a;
+    border-radius: 62px;
+    padding: 14px;
+    box-shadow: 0 40px 90px -20px rgba(10,10,15,0.5), 0 0 0 2px #232323 inset;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .iphone .side-btn { position: absolute; background: #171717; border-radius: 3px; }
+  .iphone .side-btn.action { left: -3px; top: 128px; width: 3px; height: 32px; }
+  .iphone .side-btn.vol-up { left: -3px; top: 180px; width: 3px; height: 58px; }
+  .iphone .side-btn.vol-down { left: -3px; top: 250px; width: 3px; height: 58px; }
+  .iphone .side-btn.power { right: -3px; top: 200px; width: 3px; height: 90px; }
+
+  .screen {
+    width: 100%; height: 100%;
+    background: #0f0f10;
+    border-radius: 48px;
+    overflow: hidden;
+    position: relative;
+    color: var(--w2a-ink);
+  }
+
+  .dynamic-island {
+    position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+    width: 122px; height: 34px; background: #000; border-radius: 20px; z-index: 40;
+  }
+
+  .status-bar {
+    position: absolute; top: 0; left: 0; right: 0; height: 54px;
+    display: flex; align-items: flex-end; justify-content: space-between;
+    padding: 0 28px 8px; z-index: 30;
+    font-family: var(--w2a-font-sans); font-weight: 600; font-size: 15px; color: var(--w2a-ink);
+  }
+  .status-bar .icons { display: flex; align-items: center; gap: 5px; }
+
+  /* ───────────────────────── Library screen ───────────────────────── */
+  .app-screen { position: absolute; inset: 0; background: #121212; overflow-y: auto; opacity: 1; transition: opacity var(--w2a-duration-state) var(--w2a-ease-expo); }
+  .app-screen.hidden { opacity: 0; pointer-events: none; }
+
+  .lib-header { padding: 66px 20px 6px; display: flex; align-items: flex-start; justify-content: space-between; }
+  .lib-title { font-size: 34px; font-weight: 700; letter-spacing: -0.01em; color: var(--w2a-ink); font-family: var(--w2a-font-sans); }
+  .account-btn { width: 34px; height: 34px; border-radius: 50%; background: #262626; display: flex; align-items: center; justify-content: center; color: var(--w2a-ink-dim); border: none; margin-top: 6px; }
+
+  .sync-pill {
+    margin: 8px 20px 4px;
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--w2a-live-tint); border: 1px solid var(--w2a-live);
+    color: var(--w2a-live); border-radius: var(--w2a-radius-full);
+    font-size: 12px; font-weight: 500; padding: 6px 12px;
+  }
+  .sync-pill svg { flex-shrink: 0; }
+
+  .lib-list { padding: 10px 0 24px; }
+  .lib-row {
+    display: flex; flex-direction: column; gap: 6px;
+    padding: 14px 20px; border-bottom: 1px solid #1f1f1f;
+    background: none; border-left: none; border-right: none; border-top: none;
+    width: 100%; text-align: left; color: inherit; font-family: inherit; cursor: pointer;
+  }
+  .lib-row-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .lib-row-title { font-size: 16px; font-weight: 500; color: var(--w2a-ink); line-height: 1.3; }
+  .lib-row-dur { font-size: 14px; color: var(--w2a-ink-dim); font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .lib-row-bottom { display: flex; align-items: center; justify-content: space-between; }
+  .lib-row-time { font-size: 12px; color: var(--w2a-ink-faint); }
+  .lib-row-voice { font-size: 12px; color: var(--w2a-ink-faint); }
+
+  /* ───────────────────────── Player screen ───────────────────────── */
+  .player-screen { position: absolute; inset: 0; background: #0f0f10; overflow-y: auto; transform: translateY(100%); transition: transform var(--w2a-duration-live) var(--w2a-ease-expo); z-index: 20; }
+  .player-screen.open { transform: translateY(0); }
+  .grabber { width: 36px; height: 5px; border-radius: 3px; background: #3a3a3a; margin: 12px auto 0; }
+
+  .player-inner { padding: 20px 24px 40px; display: flex; flex-direction: column; align-items: center; }
+  .artwork-wrap { margin-top: 40px; }
+  .artwork {
+    width: 240px; height: 240px; border-radius: 20px;
+    background: linear-gradient(135deg, #262626, #141414);
+    box-shadow: 0 24px 48px -12px rgba(0,0,0,0.55);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .artwork .bars { display: flex; align-items: center; gap: 5px; height: 100px; }
+  .artwork .bars span { width: 5px; border-radius: 3px; background: var(--w2a-live); opacity: 0.85; display: block; }
+
+  .p-title { margin-top: 20px; font-size: 19px; font-weight: 600; text-align: center; color: var(--w2a-ink); max-width: 320px; line-height: 1.3; }
+  .p-voice { margin-top: 4px; font-size: 14px; color: var(--w2a-ink-dim); }
+
+  .p-scrubber-wrap { width: 100%; max-width: 320px; margin-top: 20px; }
+  .p-scrubber { -webkit-appearance: none; width: 100%; height: 4px; border-radius: 2px; outline: none;
+    background: linear-gradient(to right, var(--w2a-live) 0%, var(--w2a-live) var(--pct,0%), #3a3a3a var(--pct,0%), #3a3a3a 100%); }
+  .p-scrubber::-webkit-slider-thumb { -webkit-appearance: none; width: 15px; height: 15px; border-radius: 50%; background: #fff; cursor: pointer; margin-top: -0.5px; }
+  .p-times { display: flex; justify-content: space-between; margin-top: 6px; font-size: 12px; color: var(--w2a-ink-dim); font-variant-numeric: tabular-nums; }
+
+  .p-transport { display: flex; align-items: center; gap: 32px; margin-top: 24px; }
+  .p-skip { width: 48px; height: 48px; border: none; background: none; color: var(--w2a-ink); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+  .p-toggle { width: 68px; height: 68px; border: none; background: none; color: var(--w2a-live); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+
+  .p-summary { width: 100%; max-width: 320px; margin-top: 28px; text-align: left; }
+  .p-summary h2 { font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--w2a-ink-faint); margin: 0 0 8px; }
+  .p-summary p { font-size: 15px; line-height: 1.55; color: var(--w2a-ink-dim); margin: 0; }
+
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+</style>
+</head>
+<body class="stage">
+
+  <div class="promo-copy">
+    <h1>Keep listening on the go.</h1>
+    <p>Your library syncs from Chrome to the Web2Audio iOS app.</p>
+  </div>
+
+  <div class="iphone" role="application" aria-label="iPhone running the Web2Audio app">
+    <span class="side-btn action"></span>
+    <span class="side-btn vol-up"></span>
+    <span class="side-btn vol-down"></span>
+    <span class="side-btn power"></span>
+
+    <div class="screen">
+      <div class="dynamic-island" aria-hidden="true"></div>
+      <div class="status-bar" aria-hidden="true">
+        <span>9:41</span>
+        <span class="icons">
+          <svg width="18" height="12" viewBox="0 0 18 12" fill="none"><rect x="0" y="7" width="3" height="5" rx="0.5" fill="currentColor"/><rect x="5" y="5" width="3" height="7" rx="0.5" fill="currentColor"/><rect x="10" y="3" width="3" height="9" rx="0.5" fill="currentColor"/><rect x="15" y="0" width="3" height="12" rx="0.5" fill="currentColor"/></svg>
+          <svg width="16" height="12" viewBox="0 0 16 12" fill="none"><path d="M8 9.6a1.1 1.1 0 1 0 0 2.2 1.1 1.1 0 0 0 0-2.2Z" fill="currentColor"/><path d="M4.6 7.2a4.8 4.8 0 0 1 6.8 0" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/><path d="M2 4.5a8.6 8.6 0 0 1 12 0" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>
+          <svg width="25" height="12" viewBox="0 0 25 12" fill="none"><rect x="0.75" y="0.75" width="20.5" height="10.5" rx="2.5" stroke="currentColor" stroke-opacity="0.5" stroke-width="1"/><rect x="2.25" y="2.25" width="15" height="7.5" rx="1.3" fill="currentColor"/><rect x="22.5" y="4" width="1.6" height="4" rx="0.8" fill="currentColor" fill-opacity="0.5"/></svg>
+        </span>
+      </div>
+
+      <!-- ── Library ── -->
+      <div class="app-screen" id="lib-screen">
+        <div class="lib-header">
+          <h1 class="lib-title">Library</h1>
+          <button type="button" class="account-btn" aria-label="Account">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="4" stroke="currentColor" stroke-width="1.6"/><path d="M4 20c1.6-4 4.8-6 8-6s6.4 2 8 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+
+        <p class="sync-pill">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13.5 8A5.5 5.5 0 1 1 11.8 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M13.8 2.5v3.3h-3.3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Synced from Chrome
+        </p>
+
+        <div class="lib-list" role="list" aria-label="Your audio library">
+          <button type="button" class="lib-row" id="lib-row-1" role="listitem" aria-label="Play: The slow interest of doing one thing well, 1 minute 36 seconds, Fenrir, HD voice">
+            <div class="lib-row-top">
+              <span class="lib-row-title">The slow interest of doing one thing well</span>
+              <span class="lib-row-dur">1:36</span>
+            </div>
+            <div class="lib-row-bottom">
+              <span class="lib-row-time">Just now</span>
+              <span class="lib-row-voice">Fenrir · HD voice</span>
+            </div>
+          </button>
+          <button type="button" class="lib-row" role="listitem" aria-label="Play: A short history of the corner shop, 2 minutes 4 seconds, Schedar, HD voice">
+            <div class="lib-row-top">
+              <span class="lib-row-title">A short history of the corner shop</span>
+              <span class="lib-row-dur">2:04</span>
+            </div>
+            <div class="lib-row-bottom">
+              <span class="lib-row-time">Yesterday</span>
+              <span class="lib-row-voice">Schedar · HD voice</span>
+            </div>
+          </button>
+          <button type="button" class="lib-row" role="listitem" aria-label="Play: Notes on keeping a small garden, 1 minute 51 seconds, Aoede, HD voice">
+            <div class="lib-row-top">
+              <span class="lib-row-title">Notes on keeping a small garden</span>
+              <span class="lib-row-dur">1:51</span>
+            </div>
+            <div class="lib-row-bottom">
+              <span class="lib-row-time">3 days ago</span>
+              <span class="lib-row-voice">Aoede · HD voice</span>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- ── Player ── -->
+      <div class="player-screen" id="player-screen" role="dialog" aria-label="Now playing">
+        <div class="grabber" aria-hidden="true"></div>
+        <div class="player-inner">
+          <div class="artwork-wrap">
+            <div class="artwork">
+              <div class="bars" id="p-bars" aria-hidden="true"></div>
+            </div>
+          </div>
+
+          <h1 class="p-title">The slow interest of doing one thing well</h1>
+          <p class="p-voice">Fenrir · HD voice</p>
+
+          <div class="p-scrubber-wrap">
+            <input type="range" class="p-scrubber" id="p-seek" min="0" max="1000" value="0" step="1" aria-label="Playback position" />
+            <div class="p-times">
+              <span id="p-elapsed">0:00</span>
+              <span id="p-remaining">-1:36</span>
+            </div>
+          </div>
+
+          <div class="p-transport">
+            <button type="button" class="p-skip" id="p-skip-back" aria-label="Skip back 15 seconds">
+              <svg width="26" height="26" viewBox="0 0 26 26" fill="none"><path d="M20 13a7 7 0 1 1-2-4.9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M20 5v4.5h-4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><text x="13" y="16.5" text-anchor="middle" font-size="8" fill="currentColor" font-weight="600">15</text></svg>
+            </button>
+            <button type="button" class="p-toggle" id="p-toggle" aria-label="Play">
+              <svg id="p-toggle-icon" width="68" height="68" viewBox="0 0 68 68" fill="none" aria-hidden="true">
+                <circle cx="34" cy="34" r="33" fill="currentColor" fill-opacity="0.16"/>
+                <path d="M27 20L48 34L27 48V20Z" fill="currentColor"/>
+              </svg>
+            </button>
+            <button type="button" class="p-skip" id="p-skip-fwd" aria-label="Skip forward 15 seconds">
+              <svg width="26" height="26" viewBox="0 0 26 26" fill="none"><path d="M6 13a7 7 0 1 0 2-4.9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M6 5v4.5h4.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><text x="13" y="16.5" text-anchor="middle" font-size="8" fill="currentColor" font-weight="600">15</text></svg>
+            </button>
+          </div>
+
+          <div class="p-summary">
+            <h2>Summary</h2>
+            <p>Compounding was never only a financial idea. This essay argues that visible breakthroughs are almost always the tip of a long, unglamorous stretch of repeated, modest effort — and that mistaking urgency for progress is where most plans quietly fail.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script src="./assets/transport.js"></script>
+<script>
+  (function () {
+    // Decorative fixed waveform, matching the shipping app's placeholder heights.
+    const heights = [28, 42, 60, 50, 80, 70, 90, 60, 75, 55, 85, 65, 45, 70, 35];
+    const bars = document.getElementById("p-bars");
+    heights.forEach((h) => {
+      const s = document.createElement("span");
+      s.style.height = h + "px";
+      bars.appendChild(s);
+    });
+
+    const libScreen = document.getElementById("lib-screen");
+    const playerScreen = document.getElementById("player-screen");
+    const rows = document.querySelectorAll(".lib-row");
+    rows.forEach((row) => {
+      row.addEventListener("click", () => {
+        playerScreen.classList.add("open");
+      });
+    });
+    // Tap the grabber to dismiss back to the library, like a native sheet drag.
+    document.querySelector(".grabber").addEventListener("click", () => {
+      playerScreen.classList.remove("open");
+    });
+
+    const DURATION = 96; // 1:36 — matches the library row + the browser scene's track
+    const seek = document.getElementById("p-seek");
+    const elapsedEl = document.getElementById("p-elapsed");
+    const remainingEl = document.getElementById("p-remaining");
+    const toggleBtn = document.getElementById("p-toggle");
+    const toggleIcon = document.getElementById("p-toggle-icon");
+
+    const PLAY_PATH = '<circle cx="34" cy="34" r="33" fill="currentColor" fill-opacity="0.16"/><path d="M27 20L48 34L27 48V20Z" fill="currentColor"/>';
+    const PAUSE_PATH = '<circle cx="34" cy="34" r="33" fill="currentColor" fill-opacity="0.16"/><rect x="24" y="21" width="7" height="26" rx="2" fill="currentColor"/><rect x="37" y="21" width="7" height="26" rx="2" fill="currentColor"/>';
+
+    function render({ state, progress, elapsed }) {
+      toggleIcon.innerHTML = state === "playing" ? PAUSE_PATH : PLAY_PATH;
+      toggleBtn.setAttribute("aria-label", state === "playing" ? "Pause" : state === "ended" ? "Replay" : "Play");
+      seek.value = String(Math.round(progress * 1000));
+      seek.style.setProperty("--pct", (progress * 100).toFixed(1) + "%");
+      const e = state === "ended" ? DURATION : elapsed;
+      elapsedEl.textContent = W2A.formatTime(e);
+      remainingEl.textContent = "-" + W2A.formatTime(Math.max(0, DURATION - e));
+    }
+
+    const transport = W2A.createTransport({ duration: DURATION, onChange: render, instantStart: true });
+    toggleBtn.addEventListener("click", () => transport.activate());
+    document.getElementById("p-skip-back").addEventListener("click", () => transport.skip(-15));
+    document.getElementById("p-skip-fwd").addEventListener("click", () => transport.skip(15));
+    seek.addEventListener("input", () => transport.seekFraction(Number(seek.value) / 1000));
+  })();
+</script>
+</body>
+</html>

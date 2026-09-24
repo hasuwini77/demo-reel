@@ -1,0 +1,90 @@
+/*
+ * Web2Audio brand tokens — color values, fonts and spacing match the
+ * shipping Web2Audio extension and iOS app.
+ * Shared by browser.html, phone.html and end.html. Zero network requests:
+ * fonts are vendored in ./fonts/.
+ */
+
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/HankenGrotesk-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/HankenGrotesk-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/HankenGrotesk-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Martian Mono";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/MartianMono-SemiBold.woff2") format("woff2");
+}
+
+:root {
+  /* dark app surfaces — match the shipping Web2Audio product theme */
+  --w2a-chassis: oklch(0.17 0.006 70);
+  --w2a-surface: oklch(0.215 0.007 70);
+  --w2a-surface-inset: oklch(0.145 0.005 70);
+  --w2a-edge: oklch(0.3 0.008 70);
+  --w2a-ink: oklch(0.94 0.004 80);
+  --w2a-ink-dim: oklch(0.7 0.006 75);
+  --w2a-ink-faint: oklch(0.52 0.006 75);
+  --w2a-live: oklch(0.76 0.17 65);
+  --w2a-live-press: oklch(0.7 0.17 62);
+  --w2a-warn: oklch(0.75 0.13 55);
+  --w2a-error: oklch(0.64 0.16 25);
+  --w2a-live-tint: oklch(0.76 0.17 65 / 0.12);
+  --w2a-warn-tint: oklch(0.75 0.13 55 / 0.12);
+
+  /* light chrome-browser surfaces — standard Chrome light theme greys,
+     not brand color (the browser is not the product) */
+  --w2a-chrome-bg: #dee1e6;
+  --w2a-chrome-tab: #f2f3f5;
+  --w2a-chrome-tab-active: #ffffff;
+  --w2a-chrome-ink: #1f1f1f;
+  --w2a-chrome-ink-dim: #5f6368;
+  --w2a-chrome-edge: #cfd2d8;
+
+  --w2a-font-mono: "Martian Mono", ui-monospace, "SF Mono", monospace;
+  --w2a-font-sans: "Hanken Grotesk", -apple-system, "Segoe UI", system-ui, sans-serif;
+
+  --w2a-text-timecode: 2.5rem;
+  --w2a-text-title: 0.9375rem;
+  --w2a-text-body: 0.8125rem;
+  --w2a-text-label: 0.6875rem;
+  --w2a-text-meta: 0.625rem;
+
+  --w2a-radius-control: 0.5rem;
+  --w2a-radius-inset: 0.375rem;
+  --w2a-radius-full: 9999px;
+
+  --w2a-shadow-live: 0 0 24px -4px var(--w2a-live);
+  --w2a-ease-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --w2a-duration-press: 120ms;
+  --w2a-duration-state: 220ms;
+  --w2a-duration-live: 400ms;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+@keyframes w2a-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

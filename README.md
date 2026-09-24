@@ -15,9 +15,9 @@ Frame-exact **60 fps** demo videos of any web app, recorded from a short script 
 
 <br/>
 
-<img src="docs/nightshift.gif" width="820" alt="Nightshift, a lo-fi mixtape studio app: a track plays and its waveform animates, a tag is added, a track is dragged into the mixtape, the playhead is scrubbed, and the mixtape is exported with a toast confirmation" />
+<img src="docs/web2audio.gif" width="820" alt="Web2Audio promo: a Chrome popup summarizes an open article into playable HD-voice audio, the same summary appears synced in the iOS app player, ending on an Add to Chrome / App Store card" />
 
-<sub>Recorded live by demo-reel — <code>docs/nightshift/nightshift.scenario.mjs</code>, 20 s at 60 fps.</sub>
+<sub>A 27 s promo for <a href="https://www.web2audio.com">Web2Audio</a> — three scenarios, one <code>build.sh</code>, zero screen recording.</sub>
 
 <br/><br/>
 
@@ -105,6 +105,7 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 
 - 🖱️ **A cursor people can follow** — arrow, macOS, hand, I-beam or dot (or `auto`: follows the page), with a halo and a click effect
 - 🔍 **Smooth zoom** — ease onto what matters, the camera follows the cursor, text stays crisp (re-rendered, not upscaled); a few gentle auto-zooms by default
+- 🖼️ **Styled frame** — drop the page in a rounded window with a soft shadow, inset on a wallpaper or gradient (`frame: true` or `{ background, padding, radius, shadow }`); one plate image, zero per-frame cost
 - 🖍️ **Highlighters** — box, circle, spotlight, underline, marker
 - 💬 **Captions and badges** that survive page navigations (`BEFORE` / `AFTER`, `NEW`…)
 - 🎞️ **Exact timing** — a 1.5 s hold is 90 frames, always; loading screens are skipped, not recorded
@@ -135,7 +136,9 @@ Full API, canvas-UI targeting, before/after videos and troubleshooting: [`skills
 
 ## Live demo
 
-**[hasuwini77.github.io/demo-reel](https://hasuwini77.github.io/demo-reel/)**: watch the Nightshift reel autoplay, open the live app it was recorded from, and read the exact scenario script that drove it.
+**[hasuwini77.github.io/demo-reel](https://hasuwini77.github.io/demo-reel/)**: watch the Web2Audio promo autoplay and read the exact scenario script that drove it.
+
+Nightshift — the lo-fi mixtape studio featured in earlier releases — is still on that page as a secondary example: [open the live app](https://hasuwini77.github.io/demo-reel/nightshift/) or [view the GIF](docs/nightshift.gif) directly (`docs/nightshift/nightshift.scenario.mjs`, 20 s at 60 fps).
 
 The bundled example still ships too — `examples/tasks.scenario.mjs`, a small task app, 17 s at 60 fps:
 
