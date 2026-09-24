@@ -1,5 +1,5 @@
 // Injected into every page before any app script runs (Playwright addInitScript).
-// Two jobs:
+// Three jobs:
 //  1. Virtual clock — requestAnimationFrame, performance.now and Date.now only
 //     advance when the recorder calls __demo.tick(dt). Timers (setTimeout /
 //     setInterval) deliberately stay real: faking them makes zero-delay timer
@@ -7,6 +7,7 @@
 //  2. Overlay — cursor, halo, click effects, highlights, caption and badge. It is
 //     driven entirely by the state the recorder passes in, so it survives full
 //     page navigations.
+//  3. Text caret — drawn on the virtual clock instead of Chromium's (see below).
 (() => {
   if (window.__demo) return;
 
@@ -61,6 +62,7 @@
 
   let ui = null;
   let lastClick = 0;
+  let caretKey = "", caretSince = 0;
   function mount(theme) {
     if (ui && document.documentElement.contains(ui.root)) return ui;
     const root = document.createElement("div");
@@ -108,16 +110,19 @@
           padding: 14px 26px; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
           opacity: 0; transition: opacity .35s ease; }
         #__demo-overlay .cap.on { opacity: 1; }
+        ${t.caret === false ? "" : `input, textarea, [contenteditable] { caret-color: transparent !important; }`}
+        #__demo-overlay .caret { position: absolute; width: 1px; display: none; }
+        #__demo-overlay .mirror { position: absolute; left: -99999px; top: 0; visibility: hidden; border-style: solid; overflow-wrap: break-word; }
         #__demo-overlay .badge { position: absolute; right: 24px; top: ${t.badgeTop}px; display: none;
           font: 700 20px/1 ${t.font}; letter-spacing: .06em; color: #fff; padding: 10px 16px; border-radius: 10px; }
       </style>
-      <div class="hls"></div>
+      <div class="hls"></div><div class="caret"></div><div class="mirror"></div>
       <div class="cur"><div class="halo"></div><svg class="ptr" viewBox="0 0 24 24" width="${t.cursorSize}" height="${t.cursorSize}"></svg></div>
       <div class="hud"><div class="cap"></div><div class="badge"></div></div>`;
     (document.body || document.documentElement).appendChild(root);
     const $ = (sel) => root.querySelector(sel);
     ui = { root, cur: $(".cur"), halo: $(".halo"), ptr: $(".ptr"), hls: $(".hls"), hud: $(".hud"),
-      cap: $(".cap"), badge: $(".badge"), shape: null, hl: new Map() };
+      cap: $(".cap"), badge: $(".badge"), caret: $(".caret"), mirror: $(".mirror"), shape: null, hl: new Map() };
     return ui;
   }
 
@@ -127,6 +132,58 @@
     const el = document.elementFromPoint(s.x, s.y);
     const c = el ? getComputedStyle(el).cursor : "";
     return c === "pointer" ? "hand" : c === "text" ? "ibeam" : "arrow";
+  }
+
+  // ---- 3. text caret ---------------------------------------------------------
+  // Chromium blinks the native caret on real time, so in the video it flickers at
+  // random (a frame takes far longer than 1/fps to render). It is hidden and drawn
+  // here instead: solid for 500 ms after every keystroke or caret move, then
+  // blinking on the virtual clock — as in a real browser while someone types.
+  const MIRRORED = ["font", "letterSpacing", "wordSpacing", "textTransform", "textIndent", "tabSize", "lineHeight",
+    "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+    "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth", "boxSizing"];
+
+  /** Caret box in viewport px for the focused field, or null. */
+  function caretRect(u) {
+    const el = document.activeElement;
+    if (!el) return null;
+    if (el.isContentEditable) {
+      const sel = getSelection();
+      if (!sel.rangeCount || !sel.isCollapsed) return null;
+      const r = sel.getRangeAt(0).getClientRects()[0];
+      return r && r.height ? { x: r.left, y: r.top, h: r.height, key: sel.anchorOffset + el.textContent, el } : null;
+    }
+    const area = el.tagName === "TEXTAREA";
+    if ((!area && el.tagName !== "INPUT") || el.readOnly || el.disabled) return null;
+    let pos;
+    try { pos = el.selectionStart; } catch { return null; }
+    if (typeof pos !== "number" || pos !== el.selectionEnd) return null;
+    const cs = getComputedStyle(el), r = el.getBoundingClientRect(), m = u.mirror;
+    for (const p of MIRRORED) m.style[p] = cs[p];
+    m.style.whiteSpace = area ? "pre-wrap" : "pre";
+    m.style.width = area ? r.width + "px" : "auto";
+    const text = el.type === "password" ? "\u2022".repeat(el.value.length) : el.value;
+    m.textContent = text.slice(0, pos);
+    const mark = m.appendChild(document.createElement("span"));
+    mark.textContent = "\u200b";
+    const mr = m.getBoundingClientRect(), k = mark.getBoundingClientRect();
+    const h = Math.round(parseFloat(cs.fontSize) * 1.15);
+    const x = r.left + (k.left - mr.left) - el.scrollLeft;
+    // A single-line input centres its line; a textarea flows from the top.
+    const y = area ? r.top + (k.top - mr.top) + (k.height - h) / 2 - el.scrollTop : r.top + (r.height - h) / 2;
+    if (x < r.left || x > r.right || y < r.top || y + h > r.bottom + 1) return null;
+    return { x, y, h, color: cs.color, key: pos + "|" + el.value, el };
+  }
+
+  function syncCaret(u, s) {
+    const c = s.theme.caret === false ? null : caretRect(u);
+    if (!c) { u.caret.style.display = "none"; caretKey = ""; return; }
+    if (c.key !== caretKey) { caretKey = c.key; caretSince = vt; }
+    const on = (vt - caretSince) % 1000 < 500;
+    Object.assign(u.caret.style, {
+      display: on ? "block" : "none", left: Math.round(c.x) + "px", top: c.y + "px", height: c.h + "px",
+      background: c.color || "currentColor",
+    });
   }
 
   function highlight(h) {
@@ -164,6 +221,8 @@
     else u.cap.classList.remove("on");
     if (s.badge) { u.badge.style.display = "block"; u.badge.textContent = s.badge.text; u.badge.style.background = s.badge.color; }
     else u.badge.style.display = "none";
+
+    syncCaret(u, s);
 
     const live = new Set();
     for (const h of s.highlights) {
