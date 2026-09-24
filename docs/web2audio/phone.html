@@ -9,7 +9,12 @@
   html, body {
     margin: 0;
     height: 100%;
-    background: #e9eaec;
+    /* Same wallpaper as the browser clip's engine `frame.background`, so the
+       cut between clips flows (this scene records WITHOUT a frame, full
+       1920x1080, so the page itself carries the wallpaper). Keep this
+       string byte-for-byte identical to frame.background in
+       browser.scenario.mjs. */
+    background: radial-gradient(140% 100% at 50% -10%, oklch(0.76 0.17 65 / 0.16) 0%, oklch(0.4 0.1 55 / 0.06) 35%, transparent 65%), linear-gradient(160deg, oklch(0.19 0.01 60), oklch(0.1 0.006 70));
     font-family: var(--w2a-font-sans);
     overflow: hidden;
   }
