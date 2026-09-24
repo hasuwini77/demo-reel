@@ -8,7 +8,8 @@
 // inject.js), so the video is smooth no matter how slowly the page renders.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
@@ -58,6 +59,49 @@ if (FRAME) {
     padX = (OW - W) / 2; padY = (OH - H) / 2;
 }
 
+const isLocalImage = (bg) => !/^(linear-gradient|radial-gradient|conic-gradient|repeating-|url\(|#|rgb|hsl|var\()/i.test(bg.trim())
+    && /\.(png|jpe?g|webp|avif|gif)$/i.test(bg.trim());
+
+/** SVG path for a rounded rect, for use inside an evenodd clip-path(). */
+function roundedRectPath(x, y, w, h, r) {
+    if (r <= 0) {return `M${x} ${y} H${x + w} V${y + h} H${x} Z`;}
+    return `M${x + r} ${y} H${x + w - r} A${r} ${r} 0 0 1 ${x + w} ${y + r} V${y + h - r} `
+        + `A${r} ${r} 0 0 1 ${x + w - r} ${y + h} H${x + r} A${r} ${r} 0 0 1 ${x} ${y + h - r} `
+        + `V${y + r} A${r} ${r} 0 0 1 ${x + r} ${y} Z`;
+}
+
+/** Render the OWxOH plate once: background with a transparent rounded hole at
+ * the window rect (an evenodd clip-path donut — reliable + anti-aliased under
+ * headless omitBackground capture, unlike CSS mask-image), plus a soft outer
+ * box-shadow. ffmpeg overlays it on every frame — the alpha edge of the hole
+ * is what rounds the corners. */
+async function renderPlate(browser) {
+    const { background, radius, shadow } = FRAME;
+    const shadowCss = shadow === false ? "none"
+        : shadow === true ? "0 30px 70px -15px rgba(0,0,0,.55), 0 18px 36px -18px rgba(0,0,0,.65)"
+        : shadow;
+    const bgCss = isLocalImage(background)
+        ? `url("${pathToFileURL(path.resolve(background)).href}") center / cover no-repeat`
+        : background;
+    const outer = `M0 0 H${OW} V${OH} H0 Z`;
+    const hole = roundedRectPath(padX, padY, W, H, radius);
+    const clip = `path(evenodd, "${outer} ${hole}")`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+        html,body{margin:0;padding:0;background:transparent;overflow:hidden;}
+        .bg{position:absolute;inset:0;width:${OW}px;height:${OH}px;background:${bgCss};
+            clip-path:${clip};}
+        .shadow{position:absolute;left:${padX}px;top:${padY}px;width:${W}px;height:${H}px;
+            border-radius:${radius}px;box-shadow:${shadowCss};}
+    </style></head><body><div class="bg"></div>${shadowCss === "none" ? "" : '<div class="shadow"></div>'}</body></html>`;
+    const plate = await browser.newPage({ viewport: { width: OW, height: OH } });
+    await plate.setContent(html, { waitUntil: "networkidle" });
+    const buf = await plate.screenshot({ omitBackground: true });
+    await plate.close();
+    const platePath = path.join(os.tmpdir(), `demo-reel-plate-${process.pid}.png`);
+    writeFileSync(platePath, buf);
+    return platePath;
+}
+
 const userTheme = scenario.theme ?? {};
 const theme = {
     font: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
@@ -86,6 +130,8 @@ const browser = await chromium.launch({
     // Software WebGL so three.js / canvas scenes render headless.
     args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars"],
 });
+const platePath = FRAME ? await renderPlate(browser) : null;
+
 const context = await browser.newContext({
     viewport: { width: W, height: H },
     deviceScaleFactor: 1,
@@ -384,5 +430,6 @@ try {
     ff.stdin.end();
     await ffDone;
     await browser.close();
+    if (platePath) {try { unlinkSync(platePath); } catch { /* best effort */ }}
 }
 console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${OW}x${OH} → ${OUT}`);
