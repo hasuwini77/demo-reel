@@ -104,7 +104,7 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 ## What you get
 
 - 🖱️ **A cursor people can follow** — arrow, macOS, hand, I-beam or dot (or `auto`: follows the page), with a halo and a click effect
-- 🔍 **Smooth zoom** — ease onto what matters, the camera follows the cursor, text stays crisp (re-rendered, not upscaled)
+- 🔍 **Smooth zoom** — ease onto what matters, the camera follows the cursor, text stays crisp (re-rendered, not upscaled); a few gentle auto-zooms by default
 - 🖍️ **Highlighters** — box, circle, spotlight, underline, marker
 - 💬 **Captions and badges** that survive page navigations (`BEFORE` / `AFTER`, `NEW`…)
 - 🎞️ **Exact timing** — a 1.5 s hold is 90 frames, always; loading screens are skipped, not recorded

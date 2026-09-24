@@ -128,6 +128,48 @@ function stepCamera(dt) {
     state.cam = { x, y, z: zoom };
 }
 
+/** Aim the camera at a box; `scale` defaults to fitting the box (1.25–1.8×). */
+function aim(r, { scale, ms = 1000, follow = true } = {}) {
+    cam.w = 4.7 / (ms / 1000);
+    const fit = r.width && r.height ? Math.min((W * 0.6) / r.width, (H * 0.6) / r.height) : 1.5;
+    cam.tlz = Math.log(Math.max(1, scale ?? Math.min(Math.max(fit, 1.25), 1.8)));
+    cam.tx = r.x + r.width / 2; cam.ty = r.y + r.height / 2;
+    cam.follow = follow; cam.cx = state.x; cam.cy = state.y;
+}
+
+function aimOut(ms = 1000) {
+    cam.w = 4.7 / (ms / 1000);
+    cam.tlz = 0; cam.tx = W / 2; cam.ty = H / 2; cam.follow = false;
+}
+
+// ---------------------------------------------------------------- auto zoom
+// A few gentle zooms without asking: when typing starts, and (opt-in, `clicks`)
+// on a click in the page body followed by a long hold — opt-in because a click's
+// result often appears elsewhere (a side panel), off the zoomed frame. Rare (one per `gap`), shallow and slow, and
+// out again after `dwell` or before a long cursor move, so it never feels busy.
+// Clicks near the edges (toolbars, nav) don't zoom: their result shows elsewhere.
+// A manual d.zoom() hands the camera to the scenario for the rest of the take.
+const AUTO = theme.autoZoom === false ? null : {
+    scale: 1.35, ms: 1400, gap: 10000, dwell: 4000, minHold: 1500, clicks: false,
+    ...(typeof theme.autoZoom === "object" ? theme.autoZoom : {}),
+};
+const auto = { on: false, at: -Infinity, until: 0, typing: false, click: null, manual: false };
+const now = () => frames * DT;
+
+function autoIn(r) {
+    if (!AUTO || auto.manual || auto.on || now() < 2000 || now() - auto.at < AUTO.gap) {return;}
+    aim(r, { scale: AUTO.scale, ms: AUTO.ms });
+    auto.on = true; auto.at = now(); auto.until = now() + AUTO.dwell;
+}
+
+function autoOut() {
+    if (!auto.on) {return;}
+    aimOut(AUTO.ms);
+    auto.on = false;
+}
+
+const inBody = (p) => p.x > W * 0.15 && p.x < W * 0.85 && p.y > H * 0.12 && p.y < H * 0.88;
+
 async function applyCamera(scroll) {
     const { x, y, z } = state.cam;
     const metrics = { width: W, height: H, deviceScaleFactor: 1, mobile: false, screenWidth: W, screenHeight: H };
@@ -148,6 +190,7 @@ async function tick(dt, capture) {
     if (capture && state.highlights.some((h) => h.until <= frames * DT)) {
         state.highlights = state.highlights.filter((h) => !(h.until <= frames * DT));
     }
+    if (capture && auto.on && !auto.typing && now() > auto.until) {autoOut();}
     if (capture) {stepCamera(dt);}
     let scroll = [0, 0];
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -191,7 +234,11 @@ const d = {
     page, context, fps: FPS, width: W, height: H,
 
     /** Record `ms` of the page as it is. */
-    async hold(ms) { for (let i = 0; i < Math.round(ms / DT); i++) {await tick(DT, true);} },
+    async hold(ms) {
+        if (auto.click && AUTO?.clicks && ms >= AUTO.minHold && inBody(auto.click)) {autoIn({ ...auto.click, width: 0, height: 0 });}
+        auto.click = null;
+        for (let i = 0; i < Math.round(ms / DT); i++) {await tick(DT, true);}
+    },
     /** Advance time without recording (loading, layout settling). */
     async settle(ms = 1000) {
         for (let t = 0; t < ms; t += 50) { await tick(50, false); await page.waitForTimeout(20); }
@@ -207,6 +254,8 @@ const d = {
         const p = await point(target);
         const n = Math.max(6, Math.round(ms / DT));
         const x0 = state.x, y0 = state.y;
+        auto.click = null;
+        if (Math.hypot(p.x - x0, p.y - y0) > Math.hypot(W, H) * 0.3) {autoOut();}
         for (let i = 1; i <= n; i++) {
             const k = ease(i / n);
             state.x = x0 + (p.x - x0) * k;
@@ -227,6 +276,7 @@ const d = {
         await page.mouse.up({ button });
         state.pressed = false;
         await tick(DT, true);
+        auto.click = { x: state.x, y: state.y };
     },
     async doubleClick(target, opts = {}) {
         await d.click(target, opts);
@@ -236,7 +286,20 @@ const d = {
     },
     /** Type like a person, one frame-accurate key at a time. */
     async type(text, { delay = 90 } = {}) {
-        for (const ch of text) { await page.keyboard.type(ch); await d.hold(delay); }
+        const field = await page.evaluate(() => {
+            const el = document.activeElement;
+            if (!el || el === document.body) {return null;}
+            const r = el.getBoundingClientRect();
+            return { x: r.x, y: r.y, width: r.width, height: r.height };
+        }).catch(() => null);
+        if (field) {autoIn(field);}
+        auto.typing = true;
+        try {
+            for (const ch of text) { await page.keyboard.type(ch); await d.hold(delay); }
+        } finally {
+            auto.typing = false;
+            if (auto.on) {auto.until = now() + AUTO.dwell;}
+        }
     },
     async press(key) { await page.keyboard.press(key); await tick(DT, true); },
     /** Smooth wheel scroll by dy pixels. */
@@ -263,13 +326,9 @@ const d = {
      * `ms` is roughly how long the move takes to settle.
      */
     async zoom(target, { scale, ms = 1000, follow = true } = {}) {
-        cam.w = 4.7 / (ms / 1000);
-        if (target == null) { cam.tlz = 0; cam.tx = W / 2; cam.ty = H / 2; cam.follow = false; return; }
-        const r = await rect(target);
-        const fit = r.width && r.height ? Math.min((W * 0.6) / r.width, (H * 0.6) / r.height) : 1.5;
-        cam.tlz = Math.log(Math.max(1, scale ?? Math.min(Math.max(fit, 1.25), 1.8)));
-        cam.tx = r.x + r.width / 2; cam.ty = r.y + r.height / 2;
-        cam.follow = follow; cam.cx = state.x; cam.cy = state.y;
+        auto.manual = true; auto.on = false;
+        if (target == null) { aimOut(ms); return; }
+        aim(await rect(target), { scale, ms, follow });
     },
     /**
      * Mark a target: style "box" | "circle" | "spotlight" | "underline" | "marker".
