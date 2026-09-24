@@ -31,9 +31,10 @@ Timers (`setTimeout`/`setInterval`) are deliberately left real — faking them m
 
 ```js
 export default {
-  size: "1920x1080",          // viewport = video size
+  size: "1920x1080",          // output video size
   fps: 60,
   theme: { captionPosition: "bottom", accent: "#6366f1", cursorStyle: "auto" }, // optional, see Theme
+  frame: true,                 // optional — rounded window + shadow on a background, see Frame
   async run(d) {
     await d.open("http://localhost:4173/");     // navigate + settle (not recorded)
     d.badge("NEW", "#15803d");                  // corner badge (null hides)
@@ -71,6 +72,15 @@ export default {
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
 
 **Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`.
+
+**Frame**: `frame: true` sits the page in a rounded window with a soft shadow, inset on a wallpaper/gradient — omit it and output is unchanged. It costs nothing per frame (one plate image, composited by ffmpeg), and pairs well with zoom — the window stays put while the camera moves inside it.
+
+| Key | Does |
+|---|---|
+| `background` | Any CSS `background` value (gradient, colour…) or a path to a local image (cover-fit). |
+| `padding` | px inset on every side; the recorded page becomes `size - 2*padding`. |
+| `radius` | Window corner radius, px. |
+| `shadow` | `true` (soft default), `false`, or a CSS `box-shadow` string. |
 
 **Zoom** re-renders the visible area at the zoom level (Chromium device-metrics emulation), so text stays sharp; the page never sees a resize and clicks still land where you aim. Camera moves ride a critically damped spring stepped once per frame — they always ease in and out. Captions and the badge keep their screen size; cursor and highlights zoom with the page.
 
