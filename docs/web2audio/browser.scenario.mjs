@@ -26,28 +26,28 @@ export default {
     async run(d) {
         const { page } = d;
         await d.open(app, { settle: 1000 });
+        d.caption("Any webpage"); // shown while the plain article is still on screen
         await d.hold(1200);
 
         await d.step("open popup", async () => {
             await d.click(page.getByRole("button", { name: "Web2Audio — summarize this page" }));
             await d.hold(500);
-            d.caption("Any webpage");
+            d.caption("Audio summary, one click"); // now that the popup is open
             await d.hold(1400);
         });
 
         await d.step("zoom to popup", async () => {
-            // Lock the camera on the whole popup (header through the Length
-            // row) near the engine's 1.8x cap; `follow: false` keeps it
-            // there for the rest of the popup interactions instead of
-            // drifting toward the cursor and pinning the popup to the right
-            // edge (the popup itself is anchored top:8px/right:14px).
-            await d.zoom("#w2a-popup", { scale: 1.75, ms: 1000, follow: false });
+            // Let the camera fit the whole popup — header through the Length
+            // row — with air above/below instead of pinning to a fixed high
+            // scale (584px-tall box; 1.75x cropped its header). `follow:
+            // false` keeps it framed there for the rest of the popup
+            // interactions instead of drifting toward the cursor.
+            await d.zoom("#w2a-popup", { scale: 1.4, ms: 1000, follow: false });
             await d.hold(300);
         });
 
         await d.step("play / summarize", async () => {
             await d.click(page.getByRole("button", { name: "Play this page" }));
-            d.caption("Audio summary, one click");
             await d.hold(1600); // "Preparing audio" spinning
             await d.settle(300); // let playback pick up cleanly
             await d.hold(1600); // playing — ring fills, timecode live
