@@ -17,16 +17,18 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2.4vh 2vw;
   }
 
-  /* ───────────────────────── Chrome window ───────────────────────── */
+  /* ───────────────────────── Chrome window ─────────────────────────
+     Edge-to-edge: when recorded through the demo-reel engine's `frame`
+     option, the wallpaper/rounded-window/shadow are drawn BY THE ENGINE
+     around the viewport, so this page must fill its viewport exactly —
+     no outer margin, no outer radius, no outer shadow (that would be a
+     window inside a window). */
   .chrome-window {
-    width: min(1680px, 96vw);
-    height: min(900px, 95vh);
+    width: 100vw;
+    height: 100vh;
     background: var(--w2a-chrome-bg);
-    border-radius: 12px;
-    box-shadow: 0 30px 80px -20px rgba(20, 20, 25, 0.45), 0 2px 0 rgba(255,255,255,0.4) inset;
     display: flex;
     flex-direction: column;
     overflow: hidden;
