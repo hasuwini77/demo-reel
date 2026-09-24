@@ -36,7 +36,12 @@ export default {
         });
 
         await d.step("zoom to popup", async () => {
-            await d.zoom("#w2a-popup", { scale: 1.6, ms: 1000 });
+            // Lock the camera on the whole popup (header through the Length
+            // row) near the engine's 1.8x cap; `follow: false` keeps it
+            // there for the rest of the popup interactions instead of
+            // drifting toward the cursor and pinning the popup to the right
+            // edge (the popup itself is anchored top:8px/right:14px).
+            await d.zoom("#w2a-popup", { scale: 1.75, ms: 1000, follow: false });
             await d.hold(300);
         });
 
