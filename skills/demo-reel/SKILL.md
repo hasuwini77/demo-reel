@@ -70,7 +70,7 @@ export default {
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
 
-**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`.
+**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`.
 
 **Zoom** re-renders the visible area at the zoom level (Chromium device-metrics emulation), so text stays sharp; the page never sees a resize and clicks still land where you aim. Camera moves ride a critically damped spring stepped once per frame — they always ease in and out. Captions and the badge keep their screen size; cursor and highlights zoom with the page.
 
@@ -118,4 +118,5 @@ await d.click(node("Server A"));
 | WebGL/3D renders black | Keep the default launch flags (`--use-angle=swiftshader`); it is slow (~0.25 s/frame) but correct. |
 | Video too short/long vs plan | Durations are exact: sum of `hold` + moves. `settle` time is never recorded. |
 | Colours look washed out in PowerPoint | Don't re-encode without `-pix_fmt yuv420p`; demo-reel's output is already correct. |
+| Typed text flickers / letters hop | Fixed in v0.4.1: caret on the virtual clock, camera snaps when settled. Letters still re-render *during* a zoom move — keep zooms slow and shallow. |
 | Text slightly soft | `--png` captures lossless frames (slower, larger). |
