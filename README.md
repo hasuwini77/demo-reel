@@ -103,7 +103,9 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 
 ## What you get
 
-- 🖱️ **A cursor people can follow** — big arrow, yellow halo, ripple on every click
+- 🖱️ **A cursor people can follow** — arrow, macOS, hand, I-beam or dot (or `auto`: follows the page), with a halo and a click effect
+- 🔍 **Smooth zoom** — ease onto what matters, the camera follows the cursor, text stays crisp (re-rendered, not upscaled)
+- 🖍️ **Highlighters** — box, circle, spotlight, underline, marker
 - 💬 **Captions and badges** that survive page navigations (`BEFORE` / `AFTER`, `NEW`…)
 - 🎞️ **Exact timing** — a 1.5 s hold is 90 frames, always; loading screens are skipped, not recorded
 - 🧊 **WebGL / three.js / canvas** apps work (software rendering, still frame-exact)
@@ -123,7 +125,9 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 | `d.type(text, { delay })` | Type one key at a time (default 90 ms/key). |
 | `d.press(key)` | Keyboard shortcut, e.g. `"Control+K"`. |
 | `d.scroll(dy, { ms })` | Smooth wheel scroll. |
-| `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool)` | Overlay state; survives full page navigations. |
+| `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
+| `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
+| `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
 
@@ -159,7 +163,7 @@ demo-reel is an [Agent Skill](https://agentskills.io): any agent that reads `SKI
 
 ## Roadmap
 
-- [ ] Zoom / pan-to-focus on a region
+- [x] Zoom / pan-to-focus on a region
 - [ ] Keyboard-shortcut overlay (show `⌘K` when pressed)
 - [ ] Title and end cards
 - [ ] Audio track / voice-over from captions
