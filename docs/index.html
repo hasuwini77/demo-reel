@@ -168,6 +168,7 @@ export default {
     await d.hold(1800);
 
     await d.click(page.getByRole("button", { name: "Play tape_03.wav by @midnight.loops" }));
+    await d.zoom(".now-playing", { scale: 1.4 }); // eases in, follows the cursor
     d.caption("Press play — the waveform comes alive");
     await d.hold(2200);
 
@@ -175,6 +176,7 @@ export default {
     d.caption('Tag the mood: "chill"');
     await d.type("chill");
     await d.click(page.getByRole("button", { name: "Add tag" }));
+    await d.zoom(null); // ease back out
 
     // drag a track into the mixtape, scrub, export…
   },

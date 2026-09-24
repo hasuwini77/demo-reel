@@ -37,16 +37,26 @@ const CRF = String(flag("crf", 17));
 const PNG = Boolean(flag("png", false));
 const DT = 1000 / FPS;
 
+const userTheme = scenario.theme ?? {};
 const theme = {
     font: "Inter, system-ui, -apple-system, 'Segoe UI', sans-serif",
+    cursorStyle: "arrow",   // arrow | mac | hand | ibeam | dot | auto
+    cursorSize: 34,
     halo: true,
+    haloStyle: "fill",      // fill | ring | glow
     haloSize: 64,
     haloFill: "rgba(250, 204, 21, .30)",
     haloStroke: "rgba(234, 179, 8, .85)",
+    clickStyle: "ripple",   // ripple | ring | pulse | none
     captionSize: 26,
     captionPosition: "bottom",
     badgeTop: 84,
-    ...(scenario.theme ?? {}),
+    // One colour for halo, click effects and highlights.
+    ...(userTheme.accent ? {
+        haloFill: `color-mix(in srgb, ${userTheme.accent} 30%, transparent)`,
+        haloStroke: userTheme.accent,
+    } : {}),
+    ...userTheme,
 };
 
 // ---------------------------------------------------------------- browser + encoder
@@ -75,13 +85,74 @@ const ff = spawn("ffmpeg", [
 const ffDone = new Promise((r) => ff.on("close", r));
 
 // ---------------------------------------------------------------- state + frame loop
-const state = { x: W / 2, y: H * 0.62, cursor: true, caption: null, badge: null, clickSeq: 0, theme };
+const state = {
+    x: W / 2, y: H * 0.62, cursor: true, cursorStyle: theme.cursorStyle, pressed: false,
+    caption: null, badge: null, clickSeq: 0, highlights: [], cam: { x: 0, y: 0, z: 1 }, theme,
+};
 let frames = 0;
+let hlSeq = 0;
+
+// ---------------------------------------------------------------- zoom camera
+// Center (viewport px) and zoom, each chasing its target on a critically damped
+// spring stepped once per recorded frame: it starts and stops with zero velocity,
+// so every zoom and pan eases in and out. Zoom springs in log space, which makes
+// 1→1.5 and 1.5→1 feel equally fast.
+const cam = { x: W / 2, y: H / 2, lz: 0, vx: 0, vy: 0, vz: 0, tx: W / 2, ty: H / 2, tlz: 0, w: 4.7, follow: false, cx: 0, cy: 0 };
+let emulated = false;
+
+function spring(pos, vel, target, s) {
+    const d = pos - target, e = Math.exp(-cam.w * s), k = (vel + cam.w * d) * s;
+    return [target + (d + k) * e, (vel - cam.w * k) * e];
+}
+
+function stepCamera(dt) {
+    const z = Math.exp(cam.tlz);
+    // Follow the cursor once it moves: pan only when it leaves the middle of the view.
+    if (cam.follow && z > 1 && (state.x !== cam.cx || state.y !== cam.cy)) {
+        const mx = (W / z) * 0.3, my = (H / z) * 0.3;
+        cam.tx = Math.min(Math.max(cam.tx, state.x - mx), state.x + mx);
+        cam.ty = Math.min(Math.max(cam.ty, state.y - my), state.y + my);
+    }
+    cam.cx = state.x; cam.cy = state.y;
+    // Never show anything outside the page.
+    cam.tx = Math.min(Math.max(cam.tx, W / (2 * z)), W - W / (2 * z));
+    cam.ty = Math.min(Math.max(cam.ty, H / (2 * z)), H - H / (2 * z));
+    const s = dt / 1000;
+    [cam.x, cam.vx] = spring(cam.x, cam.vx, cam.tx, s);
+    [cam.y, cam.vy] = spring(cam.y, cam.vy, cam.ty, s);
+    [cam.lz, cam.vz] = spring(cam.lz, cam.vz, cam.tlz, s);
+    const zoom = Math.exp(cam.lz);
+    const w = W / zoom, h = H / zoom;
+    const x = Math.min(Math.max(cam.x - w / 2, 0), W - w);
+    const y = Math.min(Math.max(cam.y - h / 2, 0), H - h);
+    state.cam = { x, y, z: zoom };
+}
+
+async function applyCamera(scroll) {
+    const { x, y, z } = state.cam;
+    const metrics = { width: W, height: H, deviceScaleFactor: 1, mobile: false, screenWidth: W, screenHeight: H };
+    if (z > 1.0005) {
+        // Re-rasters the visible area at the zoom (crisp, not upscaled). The page
+        // doesn't see it: no resize, and mouse input stays in page coordinates.
+        await cdp.send("Emulation.setDeviceMetricsOverride", {
+            ...metrics, viewport: { x: x + scroll[0], y: y + scroll[1], width: W / z, height: H / z, scale: z },
+        });
+        emulated = true;
+    } else if (emulated) {
+        await cdp.send("Emulation.setDeviceMetricsOverride", metrics);
+        emulated = false;
+    }
+}
 
 async function tick(dt, capture) {
+    if (capture && state.highlights.some((h) => h.until <= frames * DT)) {
+        state.highlights = state.highlights.filter((h) => !(h.until <= frames * DT));
+    }
+    if (capture) {stepCamera(dt);}
+    let scroll = [0, 0];
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            await page.evaluate(([dt, s]) => window.__demo?.tick(dt, s), [dt, state]);
+            scroll = await page.evaluate(([dt, s]) => window.__demo?.tick(dt, s), [dt, state]) ?? scroll;
             break;
         } catch {
             // Mid-navigation: wait for the new document (inject.js re-runs there).
@@ -89,6 +160,7 @@ async function tick(dt, capture) {
         }
     }
     if (!capture) {return;}
+    await applyCamera(scroll);
     const { data } = await cdp.send("Page.captureScreenshot", PNG
         ? { format: "png" }
         : { format: "jpeg", quality: 92, optimizeForSpeed: true });
@@ -98,14 +170,20 @@ async function tick(dt, capture) {
 
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
-async function point(target) {
-    if (target == null) {return { x: state.x, y: state.y };}
-    if (typeof target === "function") {return target(page);}
-    if (typeof target.x === "number" && typeof target.y === "number") {return target;}
+/** Box of a target, in viewport px. A point ({x, y}) is a zero-size box. */
+async function rect(target) {
+    if (target == null) {return { x: state.x, y: state.y, width: 0, height: 0 };}
+    if (typeof target === "function") {return { width: 0, height: 0, ...(await target(page)) };}
+    if (typeof target.x === "number" && typeof target.y === "number") {return { width: 0, height: 0, ...target };}
     const loc = typeof target === "string" ? page.locator(target) : target;
     const b = await loc.first().boundingBox({ timeout: 5000 });
     if (!b) {throw new Error(`demo-reel: target not visible: ${String(target)}`);}
-    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+    return b;
+}
+
+async function point(target) {
+    const r = await rect(target);
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
 }
 
 // ---------------------------------------------------------------- scenario API
@@ -143,9 +221,11 @@ const d = {
         await d.move(target, { ms });
         await d.hold(pause);
         state.clickSeq++;
+        state.pressed = true;
         await page.mouse.down({ button });
         await tick(DT, true); await tick(DT, true);
         await page.mouse.up({ button });
+        state.pressed = false;
         await tick(DT, true);
     },
     async doubleClick(target, opts = {}) {
@@ -174,7 +254,35 @@ const d = {
     caption(text) { state.caption = text || null; },
     /** Corner badge, e.g. d.badge("BEFORE", "#b91c1c"); null hides it. */
     badge(text, color = "#15803d") { state.badge = text ? { text, color } : null; },
-    cursor(visible) { state.cursor = visible; },
+    /** true/false shows/hides the cursor; a name switches its shape (arrow, mac, hand, ibeam, dot, auto). */
+    cursor(v) { if (typeof v === "string") {state.cursorStyle = v;} else {state.cursor = v;} },
+    /**
+     * Ease the camera onto a target (any target; an element's box is framed to
+     * fit). Returns at once — the zoom plays over the following moves and holds,
+     * and the camera then follows the cursor. `d.zoom(null)` eases back out.
+     * `ms` is roughly how long the move takes to settle.
+     */
+    async zoom(target, { scale, ms = 1000, follow = true } = {}) {
+        cam.w = 4.7 / (ms / 1000);
+        if (target == null) { cam.tlz = 0; cam.tx = W / 2; cam.ty = H / 2; cam.follow = false; return; }
+        const r = await rect(target);
+        const fit = r.width && r.height ? Math.min((W * 0.6) / r.width, (H * 0.6) / r.height) : 1.5;
+        cam.tlz = Math.log(Math.max(1, scale ?? Math.min(Math.max(fit, 1.25), 1.8)));
+        cam.tx = r.x + r.width / 2; cam.ty = r.y + r.height / 2;
+        cam.follow = follow; cam.cx = state.x; cam.cy = state.y;
+    },
+    /**
+     * Mark a target: style "box" | "circle" | "spotlight" | "underline" | "marker".
+     * Stays until `ms` has been recorded, or until `d.highlight(null)` clears all.
+     */
+    async highlight(target, { style = "box", color = theme.haloStroke, pad = 8, ms } = {}) {
+        if (target == null) { state.highlights = []; return; }
+        const r = await rect(target);
+        state.highlights = [...state.highlights, {
+            id: ++hlSeq, style, color, pad, x: r.x, y: r.y, w: r.width, h: r.height,
+            until: ms ? frames * DT + ms : Infinity,
+        }];
+    },
     /** Run a named step; a failure is logged and the recording continues. */
     async step(name, fn) {
         try { await fn(); } catch (e) { console.warn(`step "${name}" failed: ${String(e.message).split("\n")[0]}`); }

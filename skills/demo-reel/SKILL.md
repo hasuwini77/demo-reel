@@ -1,6 +1,6 @@
 ---
 name: demo-reel
-description: Record a smooth, frame-exact 60 fps demo video of any web app from a short script — scripted cursor with a highlight halo, click ripples, captions and a corner badge, rendered on a virtual clock so it never stutters, encoded to an MP4 that loops in PowerPoint, Keynote or on the web. Use when the user wants a demo video, product walkthrough, screen recording, feature tour, before/after comparison video, a clip for a slide deck or landing page, or says "record the app", "make a video of", "screen capture", "show how it feels", "demo reel". Also for turning a Playwright flow into a video or making an existing recording smoother (60 fps).
+description: Record a smooth, frame-exact 60 fps demo video of any web app from a short script — scripted cursor (arrow, hand, dot…) with a halo, click effects, smooth zooms, highlighters (box, circle, spotlight, marker), captions and a corner badge, rendered on a virtual clock so it never stutters, encoded to an MP4 that loops in PowerPoint, Keynote or on the web. Use when the user wants a demo video, product walkthrough, screen recording, feature tour, before/after comparison video, a clip for a slide deck or landing page, or says "record the app", "make a video of", "screen capture", "show how it feels", "demo reel". Also for turning a Playwright flow into a video or making an existing recording smoother (60 fps).
 ---
 
 # demo-reel
@@ -33,17 +33,20 @@ Timers (`setTimeout`/`setInterval`) are deliberately left real — faking them m
 export default {
   size: "1920x1080",          // viewport = video size
   fps: 60,
-  theme: { captionPosition: "bottom", haloFill: "rgba(250,204,21,.30)" }, // optional
+  theme: { captionPosition: "bottom", accent: "#6366f1", cursorStyle: "auto" }, // optional, see Theme
   async run(d) {
     await d.open("http://localhost:4173/");     // navigate + settle (not recorded)
     d.badge("NEW", "#15803d");                  // corner badge (null hides)
     d.caption("The new dashboard");             // caption pill (null hides)
     await d.hold(1500);                          // record 1.5 s as-is
     await d.click(d.page.getByRole("button", { name: "Filters" }));
+    await d.zoom("#filters");                  // ease in; the camera follows the cursor
     d.caption("Filters live in one panel");     // set captions AFTER the action
     await d.hold(1200);
     await d.type("Stockholm");                  // human-speed typing
     await d.press("Enter");
+    await d.highlight(".results", { style: "box", ms: 1500 });
+    await d.zoom(null);                         // ease back out
     await d.scroll(600);                        // smooth wheel scroll
     await d.step("optional part", async () => { /* failures are logged, recording continues */ });
   },
@@ -61,9 +64,15 @@ export default {
 | `d.type(text, { delay })` | Type one key at a time (default 90 ms/key). |
 | `d.press(key)` | Keyboard shortcut, e.g. `"Escape"`, `"Control+K"`. |
 | `d.scroll(dy, { ms })` | Smooth wheel scroll. |
-| `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool)` | Overlay state; survives full page navigations. |
+| `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
+| `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
+| `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. `d.cursor("hand")` switches shape mid-take. |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
+
+**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `captionPosition`, `captionSize`, `badgeTop`, `font`.
+
+**Zoom** re-renders the visible area at the zoom level (Chromium device-metrics emulation), so text stays sharp; the page never sees a resize and clicks still land where you aim. Camera moves ride a critically damped spring stepped once per frame — they always ease in and out. Captions and the badge keep their screen size; cursor and highlights zoom with the page.
 
 **Targets** can be a Playwright `Locator`, a CSS selector string, `{ x, y }`, or an async function `(page) => ({ x, y })`.
 
@@ -87,6 +96,7 @@ await d.click(node("Server A"));
 - **Before/after**: record two scenarios with the same story and steps, badge `BEFORE`/`AFTER` (red/green), and keep them separate files plus an optional concatenation.
 - **Hero moments** (a landing page, an animation): give them 5–10 s — viewers need a moment to take it in.
 - **Keep the cursor calm**: 600–900 ms per move, park it away from content while holding.
+- **Zoom sparingly**: one or two zooms per minute, 1.3–1.5×, on the moment that matters (a value changing, small text). Zoom out before a big move across the screen. A highlight is often enough.
 - Real timers keep running while frames render (~50–300 ms real time per frame), so timer-driven UI — toasts, debounced search, auto-dismissing tooltips — may disappear sooner in the video than in real life. Trigger them right before you want them on screen, or hold less.
 
 ## Using the video
