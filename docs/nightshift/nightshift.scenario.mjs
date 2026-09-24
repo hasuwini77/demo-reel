@@ -26,6 +26,7 @@ export default {
         captionPosition: "bottom",
         haloFill: "rgba(255, 201, 163, .30)",
         haloStroke: "rgba(255, 201, 163, .9)",
+        cursorStyle: "auto", // hand over buttons, I-beam over the tag field
         badgeTop: 116, // clear of Nightshift's own top-right tempo/vinyl widget
     },
 
@@ -38,6 +39,7 @@ export default {
 
         await d.step("play", async () => {
             await d.click(page.getByRole("button", { name: "Play tape_03.wav by @midnight.loops" }));
+            await d.zoom(".now-playing", { scale: 1.4, ms: 1100 });
             d.caption("Press play — the waveform comes alive");
             await d.hold(2200);
         });
@@ -48,7 +50,9 @@ export default {
             await d.type("chill");
             await d.hold(250);
             await d.click(page.getByRole("button", { name: "Add tag" }));
-            await d.hold(1300);
+            await d.hold(900);
+            await d.zoom(null, { ms: 900 });
+            await d.hold(400);
         });
 
         await d.step("drag", async () => {
@@ -60,6 +64,7 @@ export default {
             await d.move(mixtapeDropPoint, { ms: 950 });
             await d.hold(250);
             await page.mouse.up();
+            await d.highlight("#mixtape", { style: "box", pad: 6, ms: 1300 });
             await d.hold(1300);
         });
 
