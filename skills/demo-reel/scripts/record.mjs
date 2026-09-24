@@ -31,11 +31,32 @@ const mod = await import(pathToFileURL(path.resolve(scenarioPath)).href);
 const scenario = typeof mod.default === "function" ? { run: mod.default } : mod.default;
 
 const FPS = Number(flag("fps", scenario.fps ?? 60));
-const [W, H] = String(flag("size", scenario.size ?? "1920x1080")).split("x").map(Number);
+const [OW, OH] = String(flag("size", scenario.size ?? "1920x1080")).split("x").map(Number);
 const OUT = path.resolve(flag("out", scenario.out ?? path.basename(scenarioPath).replace(/\.(scenario\.)?m?js$/, "") + ".mp4"));
 const CRF = String(flag("crf", 17));
 const PNG = Boolean(flag("png", false));
 const DT = 1000 / FPS;
+
+// ---------------------------------------------------------------- styled frame
+// `frame` puts the page in a rounded window, inset on a background, with a soft
+// shadow — zero per-frame cost: it's a single plate image composited by ffmpeg,
+// not drawn every frame. Omitted => output is byte-for-byte today's behaviour.
+const frameCfg = scenario.frame === true ? {} : scenario.frame || null;
+const FRAME = frameCfg ? {
+    background: frameCfg.background ?? "linear-gradient(135deg, #1c1f3d, #3a2a1a)",
+    padding: Math.round(frameCfg.padding ?? OW * 0.04),
+    radius: frameCfg.radius ?? 14,
+    shadow: frameCfg.shadow ?? true,
+} : null;
+
+// W/H stay the *viewport* size (what the page/camera/cursor see); OW/OH is the
+// final video size. Round to even numbers — required for yuv420p.
+let W = OW, H = OH, padX = 0, padY = 0;
+if (FRAME) {
+    W = OW - 2 * FRAME.padding; H = OH - 2 * FRAME.padding;
+    W -= W % 2; H -= H % 2;
+    padX = (OW - W) / 2; padY = (OH - H) / 2;
+}
 
 const userTheme = scenario.theme ?? {};
 const theme = {
@@ -364,4 +385,4 @@ try {
     await ffDone;
     await browser.close();
 }
-console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${W}x${H} → ${OUT}`);
+console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${OW}x${OH} → ${OUT}`);
