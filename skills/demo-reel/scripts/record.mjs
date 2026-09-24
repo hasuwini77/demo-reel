@@ -8,7 +8,8 @@
 // inject.js), so the video is smooth no matter how slowly the page renders.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
 
@@ -31,11 +32,75 @@ const mod = await import(pathToFileURL(path.resolve(scenarioPath)).href);
 const scenario = typeof mod.default === "function" ? { run: mod.default } : mod.default;
 
 const FPS = Number(flag("fps", scenario.fps ?? 60));
-const [W, H] = String(flag("size", scenario.size ?? "1920x1080")).split("x").map(Number);
+const [OW, OH] = String(flag("size", scenario.size ?? "1920x1080")).split("x").map(Number);
 const OUT = path.resolve(flag("out", scenario.out ?? path.basename(scenarioPath).replace(/\.(scenario\.)?m?js$/, "") + ".mp4"));
 const CRF = String(flag("crf", 17));
 const PNG = Boolean(flag("png", false));
 const DT = 1000 / FPS;
+
+// ---------------------------------------------------------------- styled frame
+// `frame` puts the page in a rounded window, inset on a background, with a soft
+// shadow — zero per-frame cost: it's a single plate image composited by ffmpeg,
+// not drawn every frame. Omitted => output is byte-for-byte today's behaviour.
+const frameCfg = scenario.frame === true ? {} : scenario.frame || null;
+const FRAME = frameCfg ? {
+    background: frameCfg.background ?? "linear-gradient(135deg, #1c1f3d, #3a2a1a)",
+    padding: Math.round(frameCfg.padding ?? OW * 0.04),
+    radius: frameCfg.radius ?? 14,
+    shadow: frameCfg.shadow ?? true,
+} : null;
+
+// W/H stay the *viewport* size (what the page/camera/cursor see); OW/OH is the
+// final video size. Round to even numbers — required for yuv420p.
+let W = OW, H = OH, padX = 0, padY = 0;
+if (FRAME) {
+    W = OW - 2 * FRAME.padding; H = OH - 2 * FRAME.padding;
+    W -= W % 2; H -= H % 2;
+    padX = (OW - W) / 2; padY = (OH - H) / 2;
+}
+
+const isLocalImage = (bg) => !/^(linear-gradient|radial-gradient|conic-gradient|repeating-|url\(|#|rgb|hsl|var\()/i.test(bg.trim())
+    && /\.(png|jpe?g|webp|avif|gif)$/i.test(bg.trim());
+
+/** SVG path for a rounded rect, for use inside an evenodd clip-path(). */
+function roundedRectPath(x, y, w, h, r) {
+    if (r <= 0) {return `M${x} ${y} H${x + w} V${y + h} H${x} Z`;}
+    return `M${x + r} ${y} H${x + w - r} A${r} ${r} 0 0 1 ${x + w} ${y + r} V${y + h - r} `
+        + `A${r} ${r} 0 0 1 ${x + w - r} ${y + h} H${x + r} A${r} ${r} 0 0 1 ${x} ${y + h - r} `
+        + `V${y + r} A${r} ${r} 0 0 1 ${x + r} ${y} Z`;
+}
+
+/** Render the OWxOH plate once: background with a transparent rounded hole at
+ * the window rect (an evenodd clip-path donut — reliable + anti-aliased under
+ * headless omitBackground capture, unlike CSS mask-image), plus a soft outer
+ * box-shadow. ffmpeg overlays it on every frame — the alpha edge of the hole
+ * is what rounds the corners. */
+async function renderPlate(browser) {
+    const { background, radius, shadow } = FRAME;
+    const shadowCss = shadow === false ? "none"
+        : shadow === true ? "0 30px 70px -15px rgba(0,0,0,.55), 0 18px 36px -18px rgba(0,0,0,.65)"
+        : shadow;
+    const bgCss = isLocalImage(background)
+        ? `url("${pathToFileURL(path.resolve(background)).href}") center / cover no-repeat`
+        : background;
+    const outer = `M0 0 H${OW} V${OH} H0 Z`;
+    const hole = roundedRectPath(padX, padY, W, H, radius);
+    const clip = `path(evenodd, "${outer} ${hole}")`;
+    const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+        html,body{margin:0;padding:0;background:transparent;overflow:hidden;}
+        .bg{position:absolute;inset:0;width:${OW}px;height:${OH}px;background:${bgCss};
+            clip-path:${clip};}
+        .shadow{position:absolute;left:${padX}px;top:${padY}px;width:${W}px;height:${H}px;
+            border-radius:${radius}px;box-shadow:${shadowCss};}
+    </style></head><body><div class="bg"></div>${shadowCss === "none" ? "" : '<div class="shadow"></div>'}</body></html>`;
+    const plate = await browser.newPage({ viewport: { width: OW, height: OH } });
+    await plate.setContent(html, { waitUntil: "networkidle" });
+    const buf = await plate.screenshot({ omitBackground: true });
+    await plate.close();
+    const platePath = path.join(os.tmpdir(), `demo-reel-plate-${process.pid}.png`);
+    writeFileSync(platePath, buf);
+    return platePath;
+}
 
 const userTheme = scenario.theme ?? {};
 const theme = {
@@ -65,6 +130,8 @@ const browser = await chromium.launch({
     // Software WebGL so three.js / canvas scenes render headless.
     args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars"],
 });
+const platePath = FRAME ? await renderPlate(browser) : null;
+
 const context = await browser.newContext({
     viewport: { width: W, height: H },
     deviceScaleFactor: 1,
@@ -75,13 +142,26 @@ await context.addInitScript(readFileSync(path.join(HERE, "inject.js"), "utf8"));
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
 
-const ff = spawn("ffmpeg", [
+const ffArgs = [
     "-y", "-loglevel", "error",
     "-f", "image2pipe", "-framerate", String(FPS), "-c:v", PNG ? "png" : "mjpeg", "-i", "-",
-    "-vf", `${PNG ? "" : "scale=in_range=full:out_range=tv,"}format=yuv420p`,
+];
+if (FRAME) {
+    ffArgs.push(
+        "-loop", "1", "-framerate", String(FPS), "-i", platePath,
+        "-filter_complex",
+        `[0:v]${PNG ? "" : "scale=in_range=full:out_range=tv,"}pad=${OW}:${OH}:${padX}:${padY}:color=black[p];`
+        + `[p][1:v]overlay=0:0:shortest=1,format=yuv420p[outv]`,
+        "-map", "[outv]",
+    );
+} else {
+    ffArgs.push("-vf", `${PNG ? "" : "scale=in_range=full:out_range=tv,"}format=yuv420p`);
+}
+ffArgs.push(
     "-c:v", "libx264", "-preset", "slow", "-crf", CRF, "-r", String(FPS),
     "-color_range", "tv", "-movflags", "+faststart", "-an", OUT,
-], { stdio: ["pipe", "inherit", "inherit"] });
+);
+const ff = spawn("ffmpeg", ffArgs, { stdio: ["pipe", "inherit", "inherit"] });
 const ffDone = new Promise((r) => ff.on("close", r));
 
 // ---------------------------------------------------------------- state + frame loop
@@ -363,5 +443,6 @@ try {
     ff.stdin.end();
     await ffDone;
     await browser.close();
+    if (platePath) {try { unlinkSync(platePath); } catch { /* best effort */ }}
 }
-console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${W}x${H} → ${OUT}`);
+console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${OW}x${OH} → ${OUT}`);
