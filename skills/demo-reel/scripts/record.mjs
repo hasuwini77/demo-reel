@@ -142,13 +142,26 @@ await context.addInitScript(readFileSync(path.join(HERE, "inject.js"), "utf8"));
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
 
-const ff = spawn("ffmpeg", [
+const ffArgs = [
     "-y", "-loglevel", "error",
     "-f", "image2pipe", "-framerate", String(FPS), "-c:v", PNG ? "png" : "mjpeg", "-i", "-",
-    "-vf", `${PNG ? "" : "scale=in_range=full:out_range=tv,"}format=yuv420p`,
+];
+if (FRAME) {
+    ffArgs.push(
+        "-loop", "1", "-framerate", String(FPS), "-i", platePath,
+        "-filter_complex",
+        `[0:v]${PNG ? "" : "scale=in_range=full:out_range=tv,"}pad=${OW}:${OH}:${padX}:${padY}:color=black[p];`
+        + `[p][1:v]overlay=0:0:shortest=1,format=yuv420p[outv]`,
+        "-map", "[outv]",
+    );
+} else {
+    ffArgs.push("-vf", `${PNG ? "" : "scale=in_range=full:out_range=tv,"}format=yuv420p`);
+}
+ffArgs.push(
     "-c:v", "libx264", "-preset", "slow", "-crf", CRF, "-r", String(FPS),
     "-color_range", "tv", "-movflags", "+faststart", "-an", OUT,
-], { stdio: ["pipe", "inherit", "inherit"] });
+);
+const ff = spawn("ffmpeg", ffArgs, { stdio: ["pipe", "inherit", "inherit"] });
 const ffDone = new Promise((r) => ff.on("close", r));
 
 // ---------------------------------------------------------------- state + frame loop
