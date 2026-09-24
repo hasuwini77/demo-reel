@@ -21,19 +21,49 @@
   body.stage {
     display: flex;
     align-items: center;
-    justify-content: center;
-    padding: 2vh 2vw;
+    justify-content: space-between;
+    gap: 4vw;
+    padding: 0 6vw 0 8vw;
   }
 
-  /* ───────────────────────── iPhone frame ───────────────────────── */
+  /* ───────────────────────── Promo copy (left) ───────────────────────── */
+  .promo-copy {
+    max-width: 480px;
+    flex-shrink: 0;
+  }
+  .promo-copy h1 {
+    margin: 0;
+    font-family: var(--w2a-font-sans);
+    font-weight: 600;
+    font-size: 46px;
+    line-height: 1.18;
+    letter-spacing: -0.01em;
+    color: var(--w2a-ink);
+  }
+  .promo-copy p {
+    margin: 18px 0 0;
+    max-width: 380px;
+    font-family: var(--w2a-font-sans);
+    font-weight: 400;
+    font-size: 17px;
+    line-height: 1.55;
+    color: var(--w2a-ink-dim);
+  }
+
+  /* ───────────────────────── iPhone frame (right) ─────────────────────────
+     App-Store hero scale: ~88% of the 1080p frame height. `zoom` (Chromium-
+     supported) blows the whole native-sized subtree up uniformly, so every
+     fixed-px child below stays in proportion without being rewritten. */
   .iphone {
     width: 402px;
     height: 874px;
+    zoom: 1.087;
     background: #0a0a0a;
     border-radius: 62px;
     padding: 14px;
     box-shadow: 0 40px 90px -20px rgba(10,10,15,0.5), 0 0 0 2px #232323 inset;
     position: relative;
+    flex-shrink: 0;
   }
   .iphone .side-btn { position: absolute; background: #171717; border-radius: 3px; }
   .iphone .side-btn.action { left: -3px; top: 128px; width: 3px; height: 32px; }
@@ -131,6 +161,11 @@
 </style>
 </head>
 <body class="stage">
+
+  <div class="promo-copy">
+    <h1>Keep listening on the go.</h1>
+    <p>Your library syncs from Chrome to the Web2Audio iOS app.</p>
+  </div>
 
   <div class="iphone" role="application" aria-label="iPhone running the Web2Audio app">
     <span class="side-btn action"></span>

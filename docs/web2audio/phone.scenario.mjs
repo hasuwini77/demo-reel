@@ -22,28 +22,29 @@ export default {
 
     async run(d) {
         const { page } = d;
+        // No captions in this clip — the headline lives in the page itself
+        // (left of the phone), so nothing should overlap the device.
+        d.caption(null);
         await d.open(app, { settle: 1000 });
-        await d.hold(1300); // library, synced pill visible
+        await d.hold(1600); // library, synced pill visible
 
         await d.step("open player", async () => {
             await d.click(page.getByRole("listitem", { name: /The slow interest of doing one thing well/ }));
             await d.settle(500); // sheet slide-up
-            d.caption("Keep listening on the go");
-            await d.hold(1200);
+            await d.hold(1400);
         });
 
         await d.step("play", async () => {
             await d.click(page.getByRole("button", { name: "Play" }));
-            await d.hold(900);
+            await d.hold(1300);
         });
 
         await d.step("zoom on scrubber", async () => {
             await d.zoom("#p-seek", { scale: 1.5, ms: 900 });
-            await d.hold(2200); // scrubber/timecode live
+            await d.hold(2800); // scrubber/timecode live
             await d.zoom(null, { ms: 800 });
         });
 
-        d.caption(null);
-        await d.hold(500);
+        await d.hold(700);
     },
 };
