@@ -91,6 +91,8 @@ export default {
 
 **Zoom** re-renders the visible area at the zoom level (Chromium device-metrics emulation), so text stays sharp; the page never sees a resize and clicks still land where you aim. Camera moves ride a critically damped spring stepped once per frame — they always ease in and out. Captions and the badge keep their screen size; cursor and highlights zoom with the page.
 
+**Supersampled zoom** (`render: 2` in the scenario, or `--render 2`, opt-in): the page is rastered once at 2× and the zoom becomes a crop + lanczos downscale of the captured frame instead of the emulation above, so letters never re-render during a zoom move; every frame also gets 2× anti-aliasing. It costs ~4× the pixels per frame (slowest on WebGL pages) and a second encode pass, with a lossless full-size intermediate in the temp dir. Beyond 2× zoom the crop is upscaled, so text softens.
+
 **Auto-zoom** (default): a few gentle zooms without writing any — when typing starts (onto the field), and with `clicks: true` also on a click in the page body followed by a hold ≥ 1.5 s (onto the click; off by default because a click's result often opens elsewhere, e.g. a side panel). At most one per 10 s, 1.35×, slow; out again after 4 s or before a long cursor move. Clicks near the edges (toolbars, nav) never zoom — their result shows elsewhere. The first manual `d.zoom()` hands the camera to the scenario for the rest of the take.
 
 **Targets** can be a Playwright `Locator`, a CSS selector string, `{ x, y }`, or an async function `(page) => ({ x, y })`.
@@ -176,7 +178,7 @@ audio: {
 | WebGL/3D renders black | Keep the default launch flags (`--use-angle=swiftshader`); it is slow (~0.25 s/frame) but correct. |
 | Video too short/long vs plan | Durations are exact: sum of `hold` + moves. `settle` time is never recorded. |
 | Colours look washed out in PowerPoint | Don't re-encode without `-pix_fmt yuv420p`; demo-reel's output is already correct. |
-| Typed text flickers / letters hop | Fixed in v0.4.1: caret on the virtual clock, camera snaps when settled. Letters still re-render *during* a zoom move — keep zooms slow and shallow. |
+| Typed text flickers / letters hop | Fixed in v0.4.1: caret on the virtual clock, camera snaps when settled. Letters still re-render *during* a zoom move at the default render — use `render: 2`, or keep zooms slow and shallow. |
 | Text slightly soft | `--png` captures lossless frames (slower, larger). |
 | Blank or half-rastered tiles mid-zoom | Try `--capture beginframe` (see "Why the video is smooth" for what it breaks). |
 | `--capture beginframe` has no effect | It's headless only: `--headed` Chrome has no BeginFrameControl and always uses screenshots. |
