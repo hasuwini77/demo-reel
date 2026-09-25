@@ -29,12 +29,14 @@ def load(path):
 d, cuts = load(sys.argv[1]), [r for r in load(sys.argv[2]) if r["scene_score"] > 0.35]
 avg, peak = [r["YAVG"] for r in d], [r["YMAX"] for r in d]
 VISIBLE = 64  # a diff peak below this is codec noise: nothing on screen moved
-# Frozen frame: nothing moved, while both neighbours move > 3x as much (a
-# duplicated frame in the middle of motion). Pop: a visible change > 3x both
+# Frozen frame: nothing moved, while the two frames on each side move > 3x as
+# much (a duplicated frame in sustained motion; a slow ease that steps every
+# other frame is left out). Pop: a visible change > 3x both
 # neighbours, i.e. a single-frame jump; typing and discrete UI pops look the
 # same, so pops are listed for a look, not counted as jank.
-frozen = [i for i in range(1, len(d) - 1) if peak[i] < VISIBLE
-          and min(peak[i - 1], peak[i + 1]) >= VISIBLE and min(avg[i - 1], avg[i + 1]) > 3 * avg[i]]
+near = lambda i: [i - 2, i - 1, i + 1, i + 2]
+frozen = [i for i in range(2, len(d) - 2) if peak[i] < VISIBLE
+          and min(peak[j] for j in near(i)) >= VISIBLE and min(avg[j] for j in near(i)) > 3 * avg[i]]
 pops = [i for i in range(1, len(d) - 1) if peak[i] >= VISIBLE and avg[i] > 3 * max(avg[i - 1], avg[i + 1])]
 # diff row i compares frame i and i+1; report the later frame (the one on screen).
 at = lambda rows: ", ".join(f"#{i + 1} {d[i]['t']:.2f}s" for i in rows[:12]) + (" …" if len(rows) > 12 else "")
