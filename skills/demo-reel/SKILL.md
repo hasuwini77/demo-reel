@@ -13,6 +13,8 @@ A normal screen recording captures frames when the browser happens to paint; on 
 
 Timers (`setTimeout`/`setInterval`) are deliberately left real — faking them makes zero-delay timer chains in loaders and schedulers spin forever (this is why Playwright's own `page.clock` hangs on many WebGL pages).
 
+The compositor still runs on real time: image decode, tile raster, GIFs and `scroll-behavior: smooth`. `--capture beginframe` (headless only) puts it on the virtual clock too: every frame is drawn on demand by `HeadlessExperimental.beginFrame` at the frame's virtual time, with raster and decode finished before it is captured. It's opt-in because in the current headless shell, animated GIF/APNG/WebP stay on their first frame until something repaints them, and smooth `scrollIntoView`/`scroll-behavior: smooth` jump in one frame instead of animating. Try it on pages with none of those when a zoom shows half-rastered tiles. `d.scroll` stays smooth in both modes.
+
 ## Requirements
 
 - Node 18+, **ffmpeg** on PATH.
@@ -176,3 +178,5 @@ audio: {
 | Colours look washed out in PowerPoint | Don't re-encode without `-pix_fmt yuv420p`; demo-reel's output is already correct. |
 | Typed text flickers / letters hop | Fixed in v0.4.1: caret on the virtual clock, camera snaps when settled. Letters still re-render *during* a zoom move — keep zooms slow and shallow. |
 | Text slightly soft | `--png` captures lossless frames (slower, larger). |
+| Blank or half-rastered tiles mid-zoom | Try `--capture beginframe` (see "Why the video is smooth" for what it breaks). |
+| `--capture beginframe` has no effect | It's headless only: `--headed` Chrome has no BeginFrameControl and always uses screenshots. |

@@ -2,10 +2,14 @@
 // demo-reel — record a scripted walkthrough of a web app as a frame-exact MP4.
 //
 //   node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080]
-//                   [--crf 17] [--png] [--headed]
+//                   [--crf 17] [--png] [--headed] [--capture screenshot|beginframe]
 //
 // Every frame is rendered at an exact 1/fps step of a virtual clock (see
 // inject.js), so the video is smooth no matter how slowly the page renders.
+// `--capture beginframe` (headless only) puts the compositor on that clock too:
+// each frame is produced on demand by HeadlessExperimental.beginFrame, so tile
+// raster and image decode can't lag the page. Opt-in: animated GIF/APNG freeze
+// and smooth scrolls jump under it (see SKILL.md).
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
@@ -26,7 +30,7 @@ const flag = (name, def) => {
 };
 const scenarioPath = argv[0];
 if (!scenarioPath || scenarioPath.startsWith("--")) {
-    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed]");
+    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed] [--capture screenshot|beginframe]");
     process.exit(1);
 }
 const mod = await import(pathToFileURL(path.resolve(scenarioPath)).href);
@@ -38,6 +42,11 @@ const OUT = path.resolve(flag("out", scenario.out ?? path.basename(scenarioPath)
 const CRF = String(flag("crf", 17));
 const PNG = Boolean(flag("png", false));
 const DT = 1000 / FPS;
+const HEADED = Boolean(flag("headed", false));
+// Headed Chrome has no BeginFrameControl: it always uses Page.captureScreenshot.
+const BEGIN_FRAME = !HEADED && flag("capture", "screenshot") === "beginframe";
+// Software WebGL so three.js / canvas scenes render headless.
+const BASE_ARGS = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars"];
 // Voice-over: provider is named by the scenario, checked before the take starts.
 const VOICE = scenario.voice ? await createVoice(scenario.voice) : null;
 // Music bed (ducked under the voice) and click / key sounds, all mixed after the take.
@@ -83,6 +92,10 @@ function roundedRectPath(x, y, w, h, r) {
  * box-shadow. ffmpeg overlays it on every frame — the alpha edge of the hole
  * is what rounds the corners. */
 async function renderPlate(browser) {
+    // A begin-frame-controlled browser never paints on its own, so a Playwright
+    // screenshot there would hang: render the plate in a plain one.
+    const own = BEGIN_FRAME ? await chromium.launch({ args: BASE_ARGS }) : null;
+    if (own) {browser = own;}
     const { background, radius, shadow } = FRAME;
     const shadowCss = shadow === false ? "none"
         : shadow === true ? "0 30px 70px -15px rgba(0,0,0,.55), 0 18px 36px -18px rgba(0,0,0,.65)"
@@ -104,6 +117,7 @@ async function renderPlate(browser) {
     await plate.setContent(html, { waitUntil: "networkidle" });
     const buf = await plate.screenshot({ omitBackground: true });
     await plate.close();
+    if (own) {await own.close();}
     const platePath = path.join(os.tmpdir(), `demo-reel-plate-${process.pid}.png`);
     writeFileSync(platePath, buf);
     return platePath;
@@ -138,9 +152,14 @@ theme.cursorMotion = {
 
 // ---------------------------------------------------------------- browser + encoder
 const browser = await chromium.launch({
-    headless: !flag("headed", false),
-    // Software WebGL so three.js / canvas scenes render headless.
-    args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars"],
+    headless: !HEADED,
+    args: BEGIN_FRAME ? [...BASE_ARGS,
+        // Frames only happen on beginFrame, and every compositor stage (raster,
+        // decode, scroll and animation ticks) runs on the main thread inside it.
+        "--enable-begin-frame-control", "--run-all-compositor-stages-before-draw",
+        "--disable-threaded-animation", "--disable-threaded-scrolling", "--disable-checker-imaging",
+        "--disable-smooth-scrolling", "--disable-image-animation-resync",
+    ] : BASE_ARGS,
 });
 const platePath = FRAME ? await renderPlate(browser) : null;
 
@@ -191,6 +210,31 @@ const sound = (kind) => { if (SFX?.[kind]) {sfx.push({ kind, at: now() });} };
 // Karaoke captions: word spans (absolute ms) of the spoken caption, lit as they pass.
 const KARAOKE = theme.captionStyle === "karaoke";
 let karaoke = null, karaokeJob = null;
+
+// ---------------------------------------------------------------- begin frames
+// frameTimeTicks follows the virtual clock (captured and settle ticks alike) and
+// must be strictly monotonic. The clock starts at the real monotonic time, which
+// is what Chrome's TimeTicks count on Linux.
+const T0 = Number(process.hrtime.bigint() / 1000000n);
+let clock = 0, lastTicks = 0, queued = 0, lastFrameAt = 0, lastShot = null, frameQueue = Promise.resolve();
+
+function beginFrame(opts) {
+    queued++;
+    const run = () => {
+        lastTicks = Math.max(T0 + clock, lastTicks + 0.001);
+        return cdp.send("HeadlessExperimental.beginFrame", { frameTimeTicks: lastTicks, interval: DT, ...opts });
+    };
+    const p = frameQueue.then(run, run).finally(() => { queued--; lastFrameAt = performance.now(); });
+    frameQueue = p.catch(() => {});
+    return p;
+}
+
+// Mouse and wheel input is only acknowledged by a drawn frame, so Playwright waits
+// for one. When the recorder is idle (a scenario awaiting input, a locator, a
+// navigation), pump frames without a screenshot; the clock only creeps by 1 µs.
+const pump = BEGIN_FRAME ? setInterval(() => {
+    if (!queued && performance.now() - lastFrameAt > 10) {beginFrame({}).catch(() => {});}
+}, 5) : null;
 
 // ---------------------------------------------------------------- zoom camera
 // Center (viewport px) and zoom, each chasing its target on a critically damped
@@ -312,11 +356,22 @@ async function tick(dt, capture) {
             await page.waitForLoadState("domcontentloaded").catch(() => {});
         }
     }
-    if (!capture) {return;}
+    clock += dt;
+    if (!capture) {
+        if (BEGIN_FRAME) {await beginFrame({});}
+        return;
+    }
     await applyCamera(scroll);
-    const { data } = await cdp.send("Page.captureScreenshot", PNG
-        ? { format: "png" }
-        : { format: "jpeg", quality: 92, optimizeForSpeed: true });
+    const format = PNG ? { format: "png" } : { format: "jpeg", quality: 92, optimizeForSpeed: true };
+    let data;
+    if (BEGIN_FRAME) {
+        // No damage => no screenshot; the previous frame is still exact.
+        data = (await beginFrame({ screenshot: format })).screenshotData ?? lastShot;
+        if (!data) {throw new Error("demo-reel: first beginFrame returned no screenshot");}
+        lastShot = data;
+    } else {
+        ({ data } = await cdp.send("Page.captureScreenshot", format));
+    }
     if (!ff.stdin.write(Buffer.from(data, "base64"))) {await new Promise((r) => ff.stdin.once("drain", r));}
     frames++;
 }
@@ -411,8 +466,11 @@ const d = {
             const b = Math.sin(Math.PI * k) * bow;
             state.x = x0 + dx * k + dy * b;
             state.y = y0 + dy * k - dx * b;
-            await page.mouse.move(state.x, state.y);
+            // With beginFrame the move is only acknowledged by a frame: draw it now.
+            const moved = page.mouse.move(state.x, state.y);
+            if (!BEGIN_FRAME) {await moved;}
             await tick(DT, true);
+            await moved;
         }
     },
     async hover(target, opts) { await d.move(target, opts); },
@@ -567,15 +625,18 @@ const d = {
     point,
 };
 
+const t0 = performance.now();
 try {
     await scenario.run(d);
     await sayQueue;
 } finally {
+    if (pump) {clearInterval(pump);}
     ff.stdin.end();
     await ffDone;
     await browser.close();
     if (platePath) {try { unlinkSync(platePath); } catch { /* best effort */ }}
 }
+const msPerFrame = ((performance.now() - t0) / Math.max(frames, 1)).toFixed(1);
 
 // ---------------------------------------------------------------- subtitles + audio
 // Subtitles from the caption cues; times are frame-exact by construction.
@@ -638,4 +699,5 @@ if (cues.length || sfx.length || AUDIO.music) {
     renameSync(tmp, OUT);
     console.log(`demo-reel: audio mixed in: ${cues.length} voice clips, ${sfx.length} sounds${AUDIO.music ? ", music" : ""}`);
 }
-console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${OW}x${OH} → ${OUT}`);
+console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${OW}x${OH} → ${OUT}`
+    + ` (${BEGIN_FRAME ? "beginFrame" : "screenshot"}, ${msPerFrame} ms/frame)`);
