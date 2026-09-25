@@ -1,7 +1,7 @@
 // demo-reel voice — text-to-speech for d.say / captions.
 //
 //   const voice = await createVoice({ provider: "kokoro", voice: "af_heart" });
-//   const { file, dur } = await voice.synth("Hello");   // dur in ms
+//   const { file, dur, words } = await voice.synth("Hello");   // ms; words = [{ start, end }]
 //
 // The provider is always named by the scenario: cloud providers send the text
 // off the machine, so that is opt-in per take. API keys come from the
@@ -10,7 +10,7 @@
 // re-synthesizes.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const DEFAULTS = {
@@ -50,6 +50,19 @@ async function post(url, headers, body, keyVar) {
     return Buffer.from(await res.arrayBuffer());
 }
 
+/** One { start, end } (ms) per whitespace-separated word of `text`: from the
+ * provider's character alignment when there is one, else by character count. */
+function wordSpans(text, dur, align, lead = 0) {
+    const words = [...text.matchAll(/\S+/g)];
+    const a = align?.characters?.length === text.length ? align : null;
+    return words.map((m) => {
+        const i = m.index, j = i + m[0].length;
+        if (!a) {return { start: Math.round((i / text.length) * dur), end: Math.round((j / text.length) * dur) };}
+        const t = (sec) => Math.max(0, Math.round(sec * 1000 - lead));
+        return { start: t(a.character_start_times_seconds[i]), end: t(a.character_end_times_seconds[j - 1]) };
+    });
+}
+
 let kokoroModel = null;   // one load per process (~4 s)
 
 export async function createVoice(cfg, { cacheDir = path.resolve(".demo-reel-cache/voice") } = {}) {
@@ -64,12 +77,16 @@ export async function createVoice(cfg, { cacheDir = path.resolve(".demo-reel-cac
     let synthesize;
     if (provider === "elevenlabs") {
         const k = key("ELEVENLABS_API_KEY");
-        synthesize = async (text) => post(
-            `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(o.voice)}?output_format=mp3_44100_128`,
-            { "xi-api-key": k },
-            { text, model_id: o.model, ...(o.speed !== 1 ? { voice_settings: { speed: o.speed } } : {}) },
-            "ELEVENLABS_API_KEY",
-        );
+        // /with-timestamps: same audio, plus per-character times (karaoke captions).
+        synthesize = async (text) => {
+            const res = JSON.parse(await post(
+                `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(o.voice)}/with-timestamps?output_format=mp3_44100_128`,
+                { "xi-api-key": k },
+                { text, model_id: o.model, ...(o.speed !== 1 ? { voice_settings: { speed: o.speed } } : {}) },
+                "ELEVENLABS_API_KEY",
+            ));
+            return { audio: Buffer.from(res.audio_base64, "base64"), align: res.alignment };
+        };
     } else if (provider === "openai") {
         const k = key("OPENAI_API_KEY");
         synthesize = async (text) => post(
@@ -113,24 +130,30 @@ export async function createVoice(cfg, { cacheDir = path.resolve(".demo-reel-cac
     return {
         async synth(text) {
             const id = createHash("sha1").update([provider, o.voice, o.model ?? "", o.speed, text].join("|")).digest("hex");
-            const file = path.join(cacheDir, `${id}.wav`);
+            const file = path.join(cacheDir, `${id}.wav`), alignFile = path.join(cacheDir, `${id}.json`);
             const short = text.length > 48 ? `${text.slice(0, 47)}…` : text;
             if (existsSync(file)) {
                 console.log(`voice: cache hit  "${short}"`);
             } else {
                 const t0 = Date.now();
                 const raw = `${file}.raw.${o.ext}`, tmp = `${file}.part.wav`;
-                const buf = await synthesize(text, raw);
-                if (buf) {writeFileSync(raw, buf);}
+                const res = await synthesize(text, raw);
+                if (res) {writeFileSync(raw, res.audio ?? res);}
                 // Clips open with silence (Kokoro: 0.33–0.39 s): trim it, so speech
                 // starts on the frame the line was said and `dur` is honest.
                 await run("ffmpeg", ["-y", "-loglevel", "error", "-i", raw,
                     "-af", "silenceremove=start_periods=1:start_threshold=-50dB", tmp]);
+                if (res?.align) {
+                    // Alignment is relative to the untrimmed clip: keep the trimmed lead.
+                    writeFileSync(alignFile, JSON.stringify({ lead: (await probe(raw)) - (await probe(tmp)), align: res.align }));
+                }
                 unlinkSync(raw);
                 renameSync(tmp, file);
                 console.log(`voice: ${provider} "${short}" (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
             }
-            return { file, dur: await probe(file) };
+            const dur = await probe(file);
+            const { align, lead } = existsSync(alignFile) ? JSON.parse(readFileSync(alignFile, "utf8")) : {};
+            return { file, dur, words: wordSpans(text, dur, align, lead) };
         },
     };
 }
