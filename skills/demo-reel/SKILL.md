@@ -1,6 +1,6 @@
 ---
 name: demo-reel
-description: Record a smooth, frame-exact 60 fps demo video of any web app from a short script — scripted cursor (arrow, hand, dot…) with a halo, click effects, smooth zooms, highlighters (box, circle, spotlight, marker), captions and a corner badge, rendered on a virtual clock so it never stutters, encoded to an MP4 that loops in PowerPoint, Keynote or on the web. Use when the user wants a demo video, product walkthrough, screen recording, feature tour, before/after comparison video, a clip for a slide deck or landing page, or says "record the app", "make a video of", "screen capture", "show how it feels", "demo reel". Also for turning a Playwright flow into a video or making an existing recording smoother (60 fps).
+description: Record a smooth, frame-exact 60 fps demo video of any web app from a short script — scripted cursor (arrow, hand, dot…) with a halo, click effects, smooth zooms, highlighters (box, circle, spotlight, marker), callouts, title and end cards, captions and a corner badge, rendered on a virtual clock so it never stutters, encoded to an MP4 that loops in PowerPoint, Keynote or on the web. Use when the user wants a demo video, product walkthrough, screen recording, feature tour, before/after comparison video, a clip for a slide deck or landing page, or says "record the app", "make a video of", "screen capture", "show how it feels", "demo reel". Also for turning a Playwright flow into a video or making an existing recording smoother (60 fps).
 ---
 
 # demo-reel
@@ -12,6 +12,8 @@ Turn a scripted walk through a web app into a video that looks like a polished s
 A normal screen recording captures frames when the browser happens to paint; on a slow machine (or software WebGL) that is ~10–15 fps and it stutters. demo-reel instead injects a **virtual clock** (`scripts/inject.js`): `requestAnimationFrame`, `performance.now` and `Date` only advance when the recorder says so, and CSS/Web animations are stepped via `document.getAnimations()`. Each frame is advanced exactly 1/fps, screenshotted, and piped into ffmpeg. However long a frame takes to render, the result plays back perfectly smooth.
 
 Timers (`setTimeout`/`setInterval`) are deliberately left real — faking them makes zero-delay timer chains in loaders and schedulers spin forever (this is why Playwright's own `page.clock` hangs on many WebGL pages).
+
+The compositor still runs on real time: image decode, tile raster, GIFs and `scroll-behavior: smooth`. `--capture beginframe` (headless only) puts it on the virtual clock too: every frame is drawn on demand by `HeadlessExperimental.beginFrame` at the frame's virtual time, with raster and decode finished before it is captured. It's opt-in because in the current headless shell, animated GIF/APNG/WebP stay on their first frame until something repaints them, and smooth `scrollIntoView`/`scroll-behavior: smooth` jump in one frame instead of animating. Try it on pages with none of those when a zoom shows half-rastered tiles. `d.scroll` stays smooth in both modes.
 
 ## Requirements
 
@@ -47,8 +49,10 @@ export default {
     await d.type("Stockholm");                  // human-speed typing
     await d.press("Enter");
     await d.highlight(".results", { style: "box", ms: 1500 });
+    await d.callout(".filters", "Filters live here", { ms: 1500 });
     await d.zoom(null);                         // ease back out
     await d.scroll(600);                        // smooth wheel scroll
+    await d.card({ title: "Try it", subtitle: "example.com" }); // title / end card
     await d.step("optional part", async () => { /* failures are logged, recording continues */ });
   },
 };
@@ -67,6 +71,8 @@ export default {
 | `d.scroll(dy, { ms })` | Smooth wheel scroll. |
 | `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
 | `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
+| `d.callout(target, text, { side, color, ms })` | Label a target: a caption-style pill beside it, a leader line and a dot on its edge. `side` `auto` (the side with the most room) · `top` · `right` · `bottom` · `left`. Zooms with the page. Clears after `ms`, or with `d.callout(null)`. |
+| `d.card({ title, subtitle, ms, bg, align })` | Full-frame title or end card over the page (not zoomed): 350 ms fade in, `ms` shown (2500), 350 ms fade out, cursor hidden. `bg` any CSS background (`#0f172a`), `align` `center` · `left`. |
 | `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. `d.cursor("hand")` switches shape mid-take. |
 | `d.say(text, { wait })` | Voice-over from this frame (needs `voice`, see Voice-over). Returns `{ at, dur }` at once; `wait: true` holds until the clip ends. |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
@@ -128,6 +134,19 @@ export default {
 - Clips never overlap: one that would start within 150 ms of the previous clip's end is moved later, with a warning. Give long lines `wait: true` or a longer `d.hold`.
 - The clips are mixed under the untouched video (`-c:v copy`, AAC 160k, 48 kHz). No voice → the MP4 stays silent, as before.
 - **Subtitles**: every take with captions also writes `<out>.srt` and `<out>.vtt` next to the MP4 — a line starts on the frame the caption was set and ends when it is replaced or cleared.
+- **Karaoke captions**: `theme: { captionStyle: "karaoke" }` lights each caption word as it is spoken (a caption spoken by `voice.captions` or by `d.say` with the same text; unspoken captions show fully lit). ElevenLabs gives real word times (`/with-timestamps`); other providers are estimated by character count.
+
+### Music and sound effects
+
+```js
+audio: {
+  music: "bed.mp3", musicVolume: 0.18, duck: true, // looped, 1 s fade in / 1.5 s out, ducked under the voice
+  sfx: true,                                        // or { click: true, key: true, volume: 0.4 }
+},
+```
+
+- No music is shipped — bring your own licensed track. `duck` (default on) compresses the music while the voice speaks (sidechain compressor, ratio 8).
+- Click and keystroke sounds are generated by ffmpeg (no audio assets) and land on the click / key frame.
 
 ## Writing good demos
 
@@ -159,3 +178,5 @@ export default {
 | Colours look washed out in PowerPoint | Don't re-encode without `-pix_fmt yuv420p`; demo-reel's output is already correct. |
 | Typed text flickers / letters hop | Fixed in v0.4.1: caret on the virtual clock, camera snaps when settled. Letters still re-render *during* a zoom move — keep zooms slow and shallow. |
 | Text slightly soft | `--png` captures lossless frames (slower, larger). |
+| Blank or half-rastered tiles mid-zoom | Try `--capture beginframe` (see "Why the video is smooth" for what it breaks). |
+| `--capture beginframe` has no effect | It's headless only: `--headed` Chrome has no BeginFrameControl and always uses screenshots. |

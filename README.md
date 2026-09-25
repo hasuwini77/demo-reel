@@ -107,8 +107,10 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 - 🔍 **Smooth zoom** — ease onto what matters, the camera follows the cursor, text stays crisp (re-rendered, not upscaled); a few gentle auto-zooms by default
 - 🖼️ **Styled frame** — drop the page in a rounded window with a soft shadow, inset on a wallpaper or gradient (`frame: true` or `{ background, padding, radius, shadow }`); one plate image, zero per-frame cost
 - 🖍️ **Highlighters** — box, circle, spotlight, underline, marker
+- 🏷️ **Callouts and cards** — a labelled pill with a leader line on any element; full-frame title and end cards that fade on the virtual clock
 - 💬 **Captions and badges** that survive page navigations (`BEFORE` / `AFTER`, `NEW`…), plus frame-exact `.srt` / `.vtt` subtitles
 - 🗣️ **Voice-over** — `d.say(text)`, or `voice.captions: true` to speak every caption; local Kokoro or Piper, ElevenLabs, OpenAI or any command; cached, so re-takes are free
+- 🎵 **Music and sounds** — `audio: { music, duck: true, sfx: true }`: a looped music bed ducked under the voice, click and key sounds on their frames, and karaoke captions (`captionStyle: "karaoke"`)
 - 🎞️ **Exact timing** — a 1.5 s hold is 90 frames, always; loading screens are skipped, not recorded
 - 🧊 **WebGL / three.js / canvas** apps work (software rendering, still frame-exact)
 - 📦 **H.264 MP4, yuv420p** — plays and loops in PowerPoint and Keynote without conversion
@@ -129,6 +131,8 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 | `d.scroll(dy, { ms })` | Smooth wheel scroll. |
 | `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
 | `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
+| `d.callout(target, text, { side, color, ms })` | Label a target: a caption-style pill beside it, a leader line and a dot on its edge. `side` `auto` (the side with the most room) · `top` · `right` · `bottom` · `left`. Zooms with the page. Clears after `ms`, or with `d.callout(null)`. |
+| `d.card({ title, subtitle, ms, bg, align })` | Full-frame title or end card over the page (not zoomed): 350 ms fade in, `ms` shown (2500), 350 ms fade out, cursor hidden. `bg` any CSS background (`#0f172a`), `align` `center` · `left`. |
 | `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. |
 | `d.say(text, { wait })` | Voice-over from this frame (`voice: { provider }` in the scenario). |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
@@ -170,7 +174,7 @@ demo-reel is an [Agent Skill](https://agentskills.io): any agent that reads `SKI
 
 - [x] Zoom / pan-to-focus on a region
 - [ ] Keyboard-shortcut overlay (show `⌘K` when pressed)
-- [ ] Title and end cards
+- [x] Title and end cards
 - [x] Audio track / voice-over from captions
 - [ ] Auto-trim idle stretches
 

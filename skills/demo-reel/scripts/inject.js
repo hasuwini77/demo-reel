@@ -111,18 +111,36 @@
           animation-name: __demo-draw; animation-duration: .5s; }
         #__demo-overlay .hl-marker { border-radius: 4px; background: color-mix(in srgb, var(--c) 32%, transparent);
           transform-origin: left center; animation-name: __demo-draw; animation-duration: .5s; }
+        #__demo-overlay .hl-callout { width: 0; height: 0; animation-name: __demo-fade-in; }
+        #__demo-overlay .hl-callout i { position: absolute; background: var(--c); }
+        #__demo-overlay .hl-callout .dot { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; box-shadow: 0 0 0 2px #fff; }
+        #__demo-overlay .hl-callout .pill { position: absolute; white-space: nowrap; color: #fff; background: rgba(15,23,42,.86);
+          font: 600 ${Math.round(t.captionSize * 0.8)}px/1.2 ${t.font}; padding: 10px 18px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
+        #__demo-overlay .side-right .lead, #__demo-overlay .side-left .lead { top: -.75px; width: 44px; height: 1.5px; }
+        #__demo-overlay .side-top .lead, #__demo-overlay .side-bottom .lead { left: -.75px; width: 1.5px; height: 44px; }
+        #__demo-overlay .side-right .lead { left: 0; }   #__demo-overlay .side-right .pill { left: 44px; translate: 0 -50%; }
+        #__demo-overlay .side-left .lead { right: 0; }   #__demo-overlay .side-left .pill { right: 44px; translate: 0 -50%; }
+        #__demo-overlay .side-bottom .lead { top: 0; }   #__demo-overlay .side-bottom .pill { top: 44px; translate: -50% 0; }
+        #__demo-overlay .side-top .lead { bottom: 0; }   #__demo-overlay .side-top .pill { bottom: 44px; translate: -50% 0; }
         #__demo-overlay .hl.out { animation: __demo-fade-out .3s ease forwards; }
         @keyframes __demo-hl-in { from { opacity: 0; transform: scale(1.08) } to { opacity: 1; transform: none } }
         @keyframes __demo-fade-in { from { opacity: 0 } to { opacity: 1 } }
         @keyframes __demo-fade-out { from { opacity: 1 } to { opacity: 0 } }
         @keyframes __demo-draw { from { transform: scaleX(0) } to { transform: none } }
         #__demo-overlay .hud { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; transform-origin: 0 0; }
+        #__demo-overlay .card { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center;
+          gap: 20px; padding: 0 12vw; font-family: ${t.font}; color: #fff; opacity: 0; transition: opacity .35s ease; }
+        #__demo-overlay .card.on { opacity: 1; }
+        #__demo-overlay .card h1 { margin: 0; font: 700 72px/1.1 ${t.font}; }
+        #__demo-overlay .card p { margin: 0; font: 500 34px/1.3 ${t.font}; opacity: .72; }
         #__demo-overlay .cap { position: absolute; left: 50%; ${t.captionPosition === "top" ? "top: 88px" : "bottom: 96px"};
           transform: translateX(-50%); max-width: 80vw; white-space: nowrap;
           font: 600 ${t.captionSize}px/1.2 ${t.font}; color: #fff; background: rgba(15,23,42,.86);
           padding: 14px 26px; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
           opacity: 0; transition: opacity .35s ease; }
         #__demo-overlay .cap.on { opacity: 1; }
+        #__demo-overlay .cap .word { color: rgba(255,255,255,.4); transition: color .12s; }
+        #__demo-overlay .cap .word.on { color: #fff; }
         #__demo-overlay .keys { position: absolute; left: 50%; transform: translateX(-50%); display: none; gap: 10px;
           ${t.captionPosition === "top" ? "top" : "bottom"}: ${(t.captionPosition === "top" ? 88 : 96) + Math.round(t.captionSize * 1.2) + 28 + 18}px; }
         #__demo-overlay .keys kbd { min-width: 30px; text-align: center; font: 600 ${t.captionSize}px/1.2 ${t.font}; color: #fff;
@@ -136,11 +154,11 @@
       </style>
       <div class="hls"></div><div class="caret"></div><div class="mirror"></div>
       <div class="cur"><div class="halo trail"></div><div class="halo"></div><svg class="ptr" viewBox="0 0 24 24" width="${t.cursorSize}" height="${t.cursorSize}"></svg></div>
-      <div class="hud"><div class="keys"></div><div class="cap"></div><div class="badge"></div></div>`;
+      <div class="hud"><div class="card"><h1></h1><p></p></div><div class="keys"></div><div class="cap"></div><div class="badge"></div></div>`;
     (document.body || document.documentElement).appendChild(root);
     const $ = (sel) => root.querySelector(sel);
     ui = { root, cur: $(".cur"), halo: $(".halo:not(.trail)"), trail: $(".trail"), ptr: $(".ptr"), hls: $(".hls"), hud: $(".hud"),
-      cap: $(".cap"), keys: $(".keys"), badge: $(".badge"), caret: $(".caret"), mirror: $(".mirror"), shape: null, hl: new Map() };
+      card: $(".card"), cap: $(".cap"), keys: $(".keys"), badge: $(".badge"), caret: $(".caret"), mirror: $(".mirror"), shape: null, hl: new Map() };
     return ui;
   }
 
@@ -213,6 +231,16 @@
     if (h.style === "circle") { x -= h.w * 0.1; w += h.w * 0.2; y -= h.h * 0.18; ht += h.h * 0.36; }
     if (h.style === "underline") { x = h.x; w = h.w; y = h.y + h.h + p / 2; ht = 4; }
     if (h.style === "marker") { x = h.x - 4; w = h.w + 8; y = h.y; ht = h.h; }
+    if (h.style === "callout") {
+      // Anchored at the middle of the target's edge on `side`: dot, leader line, then the pill.
+      const g = 6;
+      x = { left: h.x - g, right: h.x + h.w + g }[h.side] ?? h.x + h.w / 2;
+      y = { top: h.y - g, bottom: h.y + h.h + g }[h.side] ?? h.y + h.h / 2;
+      w = ht = 0;
+      el.classList.add(`side-${h.side}`);
+      el.innerHTML = '<i class="dot"></i><i class="lead"></i><span class="pill"></span>';
+      el.querySelector(".pill").textContent = h.text;
+    }
     Object.assign(el.style, { left: x + "px", top: y + "px", width: w + "px", height: ht + "px" });
     return el;
   }
@@ -264,8 +292,30 @@
       Object.assign(u.ptr.style, { left: -hx * k + "px", top: -hy * k + "px", transformOrigin: `${hx * k}px ${hy * k}px` });
     }
     motionBlur(u, s);
-    if (s.caption) { if (u.cap.textContent !== s.caption) u.cap.textContent = s.caption; u.cap.classList.add("on"); }
+    if (s.caption) {
+      if (u.cap.textContent !== s.caption) {
+        // Karaoke: one span per word, lit as the recorder's word times pass (capLit).
+        if (s.theme.captionStyle === "karaoke") {
+          u.cap.replaceChildren(...s.caption.split(/(\s+)/).map((p) => /\S/.test(p)
+            ? Object.assign(document.createElement("span"), { className: "word", textContent: p }) : p));
+        } else u.cap.textContent = s.caption;
+      }
+      u.cap.querySelectorAll(".word").forEach((w, i) => w.classList.toggle("on", s.capLit < 0 || i < s.capLit));
+      u.cap.classList.add("on");
+    }
     else u.cap.classList.remove("on");
+    if (s.card) {
+      const c = s.card, key = JSON.stringify(c);
+      if (u.cardKey !== key) {
+        u.cardKey = key;
+        u.card.querySelector("h1").textContent = c.title || "";
+        u.card.querySelector("p").textContent = c.subtitle || "";
+        u.card.style.background = c.bg;
+        u.card.style.alignItems = c.align === "left" ? "flex-start" : "center";
+        u.card.style.textAlign = c.align === "left" ? "left" : "center";
+      }
+      u.card.classList.add("on");
+    } else u.card.classList.remove("on");
     if (s.keycap) {
       const html = s.keycap.caps.map((c) => `<kbd>${c.replace(/[&<>]/g, (x) => `&#${x.charCodeAt(0)};`)}</kbd>`).join("");
       if (u.keys.dataset.k !== html) { u.keys.dataset.k = html; u.keys.innerHTML = html; }
