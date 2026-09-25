@@ -2,14 +2,27 @@
 // Three jobs:
 //  1. Virtual clock — requestAnimationFrame, performance.now and Date.now only
 //     advance when the recorder calls __demo.tick(dt). Timers (setTimeout /
-//     setInterval) deliberately stay real: faking them makes zero-delay timer
-//     chains (loaders, schedulers) spin forever.
+//     setInterval) stay real by default: faking them all makes zero-delay timer
+//     chains (loaders, schedulers) spin forever. The opt-in hybrid clock fakes
+//     only delays of 16 ms or more, and steps smooth scrolls too.
 //  2. Overlay — cursor, halo, click effects, highlights, caption and badge. It is
 //     driven entirely by the state the recorder passes in, so it survives full
 //     page navigations.
 //  3. Text caret — drawn on the virtual clock instead of Chromium's (see below).
 (() => {
   if (window.__demo) return;
+
+  // ---- 0. seeded Math.random (theme.seed, prepended by the recorder) -------
+  if (typeof __demoSeed === "number") {
+    let a = __demoSeed >>> 0;
+    // mulberry32
+    Math.random = () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
 
   // ---- 1. virtual clock ---------------------------------------------------
   const realPerf = performance.now.bind(performance);
@@ -44,6 +57,126 @@
       }
     }
   }
+
+  // Hybrid clock (opt-in, `clock: "hybrid"`): timers of 16 ms or more wait on
+  // the virtual clock and fire inside tick() when it reaches them, so a 3 s toast
+  // lasts 3 s of video. Shorter delays stay real (zero-delay chains can't spin),
+  // and so do microtasks, MessageChannel and string callbacks.
+  const HYBRID = window.__demoClock === "hybrid";
+  const realSetTimeout = window.setTimeout.bind(window);
+  const timers = [];        // min-heap on [due, id]
+  const live = new Map();   // id -> timer; ids start high so they never meet real ones
+  let timerSeq = 1 << 30;
+  const before = (a, b) => a.due < b.due || (a.due === b.due && a.id < b.id);
+  function heapPush(t) {
+    let i = timers.push(t) - 1;
+    while (i && before(t, timers[(i - 1) >> 1])) { timers[i] = timers[(i - 1) >> 1]; i = (i - 1) >> 1; }
+    timers[i] = t;
+  }
+  function heapPop() {
+    const top = timers[0], last = timers.pop();
+    if (timers.length) {
+      let i = 0;
+      for (;;) {
+        const l = 2 * i + 1, r = l + 1;
+        let m = last;
+        if (l < timers.length && before(timers[l], m)) m = timers[l];
+        if (r < timers.length && before(timers[r], m)) m = timers[r];
+        if (m === last) break;
+        const c = m === timers[l] ? l : r;
+        timers[i] = m; i = c;
+      }
+      timers[i] = last;
+    }
+    return top;
+  }
+  /** Fire due virtual timers in order, each at its own due time, then land on `to`. */
+  let ticking = false;
+  function runTimers(to) {
+    while (timers.length && timers[0].due <= to + 1e-6) {   // float slack
+      const t = heapPop();
+      if (live.get(t.id) !== t) continue;   // cleared
+      vt = Math.max(vt, t.due);
+      if (t.every) { t.due += t.every; heapPush(t); } else live.delete(t.id);
+      try { t.fn.apply(window, t.args); } catch (err) { console.error(err); }
+    }
+    vt = to;
+  }
+  if (HYBRID) {
+    const real = { st: window.setTimeout, si: window.setInterval, ct: window.clearTimeout, ci: window.clearInterval };
+    const virtual = (realFn, every) => function (fn, delay, ...args) {
+      const ms = Number(delay) || 0;
+      if (ms < 16 || typeof fn !== "function") return realFn.call(window, fn, delay, ...args);
+      // Set between ticks (an input handler), a timer starts just after the last
+      // frame, so one due on a frame boundary fires after that frame: a 3 s toast
+      // shown by a click is on exactly 180 frames at 60 fps.
+      const t = { id: ++timerSeq, due: vt + ms + (ticking ? 0 : 1e-3), every: every ? ms : 0, fn, args };
+      live.set(t.id, t);
+      heapPush(t);
+      return t.id;
+    };
+    const clear = (realFn) => function (id) { if (!live.delete(id)) realFn.call(window, id); };
+    window.setTimeout = virtual(real.st, false);
+    window.setInterval = virtual(real.si, true);
+    window.clearTimeout = clear(real.ct);
+    window.clearInterval = clear(real.ci);
+  }
+
+  // Smooth scrolls (hybrid only): Chromium animates `behavior: "smooth"` on its
+  // own compositor clock (and jumps under --capture beginframe), so it becomes a
+  // 400 ms eased scroll stepped in tick(). scrollIntoView jumps natively, notes
+  // which scrollers moved, puts them back, then animates each one.
+  const scrolls = new Map();   // element -> { x0, y0, x1, y1, t0 }
+  const SCROLL_MS = 400;
+  const ease = (k) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+  const nativeTo = Element.prototype.scrollTo;
+  const jump = (el, x, y) => nativeTo.call(el, { left: x, top: y, behavior: "instant" });
+  function animate(el, x1, y1) {
+    scrolls.set(el, { x0: el.scrollLeft, y0: el.scrollTop, x1, y1, t0: vt });
+  }
+  function stepScrolls() {
+    for (const [el, s] of scrolls) {
+      const k = Math.min((vt - s.t0) / SCROLL_MS, 1), e = ease(k);
+      jump(el, s.x0 + (s.x1 - s.x0) * e, s.y0 + (s.y1 - s.y0) * e);
+      if (k >= 1) scrolls.delete(el);
+    }
+  }
+  if (HYBRID) {
+    const root = () => document.scrollingElement || document.documentElement;
+    const smooth = (o) => o && typeof o === "object" && o.behavior === "smooth";
+    const target = (el, o, by) => {
+      const num = (v, cur) => (Number.isFinite(+v) ? +v + (by ? cur : 0) : cur);
+      animate(el, num(o.left, el.scrollLeft), num(o.top, el.scrollTop));
+    };
+    const patch = (obj, name, by, elOf) => {
+      const orig = obj[name];
+      obj[name] = function (...a) {
+        const el = elOf(this);
+        if (!smooth(a[0])) { scrolls.delete(el); return orig.apply(this, a); }
+        target(el, a[0], by);
+      };
+    };
+    for (const [name, by] of [["scrollTo", false], ["scroll", false], ["scrollBy", true]]) {
+      patch(window, name, by, root);
+      patch(Element.prototype, name, by, (el) => el);
+    }
+    const nativeIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function (arg) {
+      if (!smooth(arg)) return nativeIntoView.call(this, arg);
+      const chain = [];
+      for (let el = this; el; el = el.parentElement ?? el.getRootNode().host) chain.push([el, el.scrollLeft, el.scrollTop]);
+      const sc = root();
+      if (!chain.some(([el]) => el === sc)) chain.push([sc, sc.scrollLeft, sc.scrollTop]);
+      nativeIntoView.call(this, { ...arg, behavior: "instant" });
+      for (const [el, x, y] of chain) {
+        const x1 = el.scrollLeft, y1 = el.scrollTop;
+        if (x1 === x && y1 === y) continue;
+        jump(el, x, y);
+        animate(el, x1, y1);
+      }
+    };
+  }
+
 
   // ---- 2. overlay -----------------------------------------------------------
   // Cursor shapes on a 24-unit grid; [svg body, hotspot x, hotspot y].
@@ -129,6 +262,11 @@
         #__demo-overlay .cap.on { opacity: 1; }
         #__demo-overlay .cap .word { color: rgba(255,255,255,.4); transition: color .12s; }
         #__demo-overlay .cap .word.on { color: #fff; }
+        #__demo-overlay .keys { position: absolute; left: 50%; transform: translateX(-50%); display: none; gap: 10px;
+          ${t.captionPosition === "top" ? "top" : "bottom"}: ${(t.captionPosition === "top" ? 88 : 96) + Math.round(t.captionSize * 1.2) + 28 + 18}px; }
+        #__demo-overlay .keys kbd { min-width: 30px; text-align: center; font: 600 ${t.captionSize}px/1.2 ${t.font}; color: #fff;
+          background: rgba(15,23,42,.86); padding: 12px 18px; border-radius: 12px;
+          box-shadow: inset 0 -3px 0 rgba(255,255,255,.14), 0 8px 30px rgba(0,0,0,.25); }
         ${t.caret === false ? "" : `input, textarea, [contenteditable] { caret-color: transparent !important; }`}
         #__demo-overlay .caret { position: absolute; width: 1px; display: none; }
         #__demo-overlay .mirror { position: absolute; left: -99999px; top: 0; visibility: hidden; border-style: solid; overflow-wrap: break-word; }
@@ -137,11 +275,11 @@
       </style>
       <div class="hls"></div><div class="caret"></div><div class="mirror"></div>
       <div class="cur"><div class="halo trail"></div><div class="halo"></div><svg class="ptr" viewBox="0 0 24 24" width="${t.cursorSize}" height="${t.cursorSize}"></svg></div>
-      <div class="hud"><div class="card"><h1></h1><p></p></div><div class="cap"></div><div class="badge"></div></div>`;
+      <div class="hud"><div class="card"><h1></h1><p></p></div><div class="keys"></div><div class="cap"></div><div class="badge"></div></div>`;
     (document.body || document.documentElement).appendChild(root);
     const $ = (sel) => root.querySelector(sel);
     ui = { root, cur: $(".cur"), halo: $(".halo:not(.trail)"), trail: $(".trail"), ptr: $(".ptr"), hls: $(".hls"), hud: $(".hud"),
-      card: $(".card"), cap: $(".cap"), badge: $(".badge"), caret: $(".caret"), mirror: $(".mirror"), shape: null, hl: new Map() };
+      card: $(".card"), cap: $(".cap"), keys: $(".keys"), badge: $(".badge"), caret: $(".caret"), mirror: $(".mirror"), shape: null, hl: new Map() };
     return ui;
   }
 
@@ -299,6 +437,11 @@
       }
       u.card.classList.add("on");
     } else u.card.classList.remove("on");
+    if (s.keycap) {
+      const html = s.keycap.caps.map((c) => `<kbd>${c.replace(/[&<>]/g, (x) => `&#${x.charCodeAt(0)};`)}</kbd>`).join("");
+      if (u.keys.dataset.k !== html) { u.keys.dataset.k = html; u.keys.innerHTML = html; }
+      u.keys.style.display = "flex"; u.keys.style.opacity = s.keycap.o;
+    } else u.keys.style.display = "none";
     if (s.badge) { u.badge.style.display = "block"; u.badge.textContent = s.badge.text; u.badge.style.background = s.badge.color; }
     else u.badge.style.display = "none";
 
@@ -334,14 +477,22 @@
     /** Advance virtual time by dt ms, run due rAF callbacks, sync overlay + animations.
      *  Returns the scroll offset, which the recorder's zoom camera needs. */
     tick(dt, state) {
-      vt += dt;
-      const now = perfBase + vt;
-      const run = queue; queue = [];
-      for (const e of run) { try { e.cb(now); } catch (err) { console.error(err); } }
-      if (state) sync(state);
-      stepAnimations();
+      ticking = true;
+      try {
+        runTimers(vt + dt);
+        stepScrolls();
+        const now = perfBase + vt;
+        const run = queue; queue = [];
+        for (const e of run) { try { e.cb(now); } catch (err) { console.error(err); } }
+        if (state) sync(state);
+        stepAnimations();
+      } finally {
+        ticking = false;
+      }
       return [scrollX, scrollY];
     },
     now: () => vt,
+    /** Real setTimeout, for the recorder's own waits inside the page. */
+    realTimeout: realSetTimeout,
   };
 })();

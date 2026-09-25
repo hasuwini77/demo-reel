@@ -11,9 +11,11 @@ Turn a scripted walk through a web app into a video that looks like a polished s
 
 A normal screen recording captures frames when the browser happens to paint; on a slow machine (or software WebGL) that is ~10–15 fps and it stutters. demo-reel instead injects a **virtual clock** (`scripts/inject.js`): `requestAnimationFrame`, `performance.now` and `Date` only advance when the recorder says so, and CSS/Web animations are stepped via `document.getAnimations()`. Each frame is advanced exactly 1/fps, screenshotted, and piped into ffmpeg. However long a frame takes to render, the result plays back perfectly smooth.
 
-Timers (`setTimeout`/`setInterval`) are deliberately left real — faking them makes zero-delay timer chains in loaders and schedulers spin forever (this is why Playwright's own `page.clock` hangs on many WebGL pages).
+Timers (`setTimeout`/`setInterval`) are left real by default — faking them all makes zero-delay timer chains in loaders and schedulers spin forever (this is why Playwright's own `page.clock` hangs on many WebGL pages).
 
-The compositor still runs on real time: image decode, tile raster, GIFs and `scroll-behavior: smooth`. `--capture beginframe` (headless only) puts it on the virtual clock too: every frame is drawn on demand by `HeadlessExperimental.beginFrame` at the frame's virtual time, with raster and decode finished before it is captured. It's opt-in because in the current headless shell, animated GIF/APNG/WebP stay on their first frame until something repaints them, and smooth `scrollIntoView`/`scroll-behavior: smooth` jump in one frame instead of animating. Try it on pages with none of those when a zoom shows half-rastered tiles. `d.scroll` stays smooth in both modes.
+**Hybrid clock** (opt-in: `clock: "hybrid"` in the scenario, or `--clock hybrid`): timers of **16 ms or more** wait on the virtual clock and fire, in order, when a frame (or a `d.settle` step) reaches them; intervals re-arm. Shorter delays, promises, `queueMicrotask` and `MessageChannel` stay real, so zero-delay chains still can't spin. A 3 s toast is then on screen for exactly 3 s of video (180 frames at 60 fps). It also turns `behavior: "smooth"` in `scrollTo`/`scrollBy`/`scroll`/`scrollIntoView` into a 400 ms eased scroll stepped per frame. Virtual timers only move while the recorder ticks: to wait for timer-driven UI (a debounced search), use `d.settle`/`d.hold`, not Playwright's `waitForSelector`.
+
+The compositor still runs on real time: image decode, tile raster, GIFs and `scroll-behavior: smooth`. `--capture beginframe` (headless only) puts it on the virtual clock too: every frame is drawn on demand by `HeadlessExperimental.beginFrame` at the frame's virtual time, with raster and decode finished before it is captured. It's opt-in because in the current headless shell, animated GIF/APNG/WebP stay on their first frame until something repaints them, and smooth `scrollIntoView`/`scroll-behavior: smooth` jump in one frame instead of animating (with the hybrid clock, script-requested `behavior: "smooth"` scrolls animate again; CSS `scroll-behavior: smooth` — anchor links, `behavior: "auto"` — still jumps). Try it on pages with none of those when a zoom shows half-rastered tiles. `d.scroll` stays smooth in both modes.
 
 ## Requirements
 
@@ -25,8 +27,9 @@ The compositor still runs on real time: image decode, tile raster, GIFs and `scr
 1. **Serve the app** the way users see it — ideally a production build (`vite build && vite preview`, `next build && next start`) against local or mock data. Dev servers work but are slower and may show dev overlays. **Never record real or sensitive data** — seed demo data.
 2. **Write a scenario** (`*.scenario.mjs`, see API below). Start from `examples/tasks.scenario.mjs`. Plan it as a story: 20–60 s, one idea per caption, 1–2 s holds after each result so viewers can read it.
 3. **Record**: `node scripts/record.mjs my.scenario.mjs --out demo.mp4`
+   Iterate with `--preview` (24 fps, lighter JPEG + x264, same viewport so layout is unchanged), then record the full take.
    A 60 s clip at 1080p takes roughly 3–10 min (heavy WebGL pages are slowest). Run it in the background.
-4. **QA**: `scripts/sheet.sh demo.mp4` writes a contact sheet (one frame every 2.5 s). Look at it: captions match what is on screen, no loading spinners, nothing covered by the caption, badge/cursor visible. Spot-check smoothness by extracting a few consecutive frames — each should differ slightly during motion.
+4. **QA**: `scripts/sheet.sh demo.mp4` writes a contact sheet (one frame every 2.5 s). Look at it: captions match what is on screen, no loading spinners, nothing covered by the caption, badge/cursor visible. It also prints a smoothness report, e.g. `jank: 0 suspicious frames, 0 hard cuts`: a *suspicious* frame is a frozen one (nothing changed while the two frames on each side move, a duplicated frame), a *hard cut* is a scene change above 0.35. *Pops* (one frame changes > 3× both neighbours) are listed but not counted: typing and discrete UI updates look the same as a real-time timer popping, so check them by eye. A single dropped frame is only ~2× its neighbours and isn't detected, and a pan at ~1 px/frame (the tail of a zoom) can round to the same pixel for a frame and show up as frozen.
 5. **Deliver** (see "Using the video").
 
 ## Scenario API
@@ -37,6 +40,7 @@ export default {
   fps: 60,
   theme: { captionPosition: "bottom", accent: "#6366f1", cursorStyle: "auto" }, // optional, see Theme
   frame: true,                 // optional — rounded window + shadow on a background, see Frame
+  clock: "hybrid",             // optional — timers >= 16 ms and smooth scrolls on the virtual clock
   async run(d) {
     await d.open("http://localhost:4173/");     // navigate + settle (not recorded)
     d.badge("NEW", "#15803d");                  // corner badge (null hides)
@@ -67,18 +71,21 @@ export default {
 | `d.click(target, { ms, button })` | Move, click with a ripple. `button: "right"` for context menus. |
 | `d.doubleClick(target)` | Double click. |
 | `d.type(text, { delay })` | Type one key at a time (default 90 ms/key). |
-| `d.press(key)` | Keyboard shortcut, e.g. `"Escape"`, `"Control+K"`. |
+| `d.press(key)` | Keyboard shortcut, e.g. `"Escape"`, `"Control+K"`. Shown as keycaps above the caption for 900 ms (`theme.keycaps`). |
 | `d.scroll(dy, { ms })` | Smooth wheel scroll. |
 | `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
 | `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
 | `d.callout(target, text, { side, color, ms })` | Label a target: a caption-style pill beside it, a leader line and a dot on its edge. `side` `auto` (the side with the most room) · `top` · `right` · `bottom` · `left`. Zooms with the page. Clears after `ms`, or with `d.callout(null)`. |
 | `d.card({ title, subtitle, ms, bg, align })` | Full-frame title or end card over the page (not zoomed): 350 ms fade in, `ms` shown (2500), 350 ms fade out, cursor hidden. `bg` any CSS background (`#0f172a`), `align` `center` · `left`. |
 | `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. `d.cursor("hand")` switches shape mid-take. |
+| `d.speed(k)` | Fast-forward: each recorded frame advances the page by k/fps, and `hold`/`type` delays count in page time (a `hold(8000)` at 4× is 2 s of video). Cursor moves, scrolls and the camera keep their on-screen speed. `d.speed(1)` resets. |
+| `d.poster()` | Mark the next recorded frame as the poster: written as `<out>.poster.jpg`. |
+| `d.chapter(title)` | Start an MP4 chapter here (listed by QuickTime, YouTube, `ffprobe -show_chapters`). |
 | `d.say(text, { wait })` | Voice-over from this frame (needs `voice`, see Voice-over). Returns `{ at, dur }` at once; `wait: true` holds until the clip ends. |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
 
-**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `cursorMotion` (`{ spring, arc, blur }`, all on; `false` turns all off — cubic ease, straight line, no blur), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`.
+**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `cursorMotion` (`{ spring, arc, blur }`, all on; `false` turns all off — cubic ease, straight line, no blur), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`, `keycaps` (`mac` default: `Control`/`Meta` → ⌘, ⌥ ⇧ ↩; `win`: Ctrl, Alt, Shift; `false` hides them), `seed` (a number: `Math.random` becomes a seeded PRNG, so apps with random demo data give identical takes).
 
 **Frame**: `frame: true` sits the page in a rounded window with a soft shadow, inset on a wallpaper/gradient — omit it and output is unchanged. It costs nothing per frame (one plate image, composited by ffmpeg), and pairs well with zoom — the window stays put while the camera moves inside it.
 
@@ -159,13 +166,14 @@ audio: {
 - **Hero moments** (a landing page, an animation): give them 5–10 s — viewers need a moment to take it in.
 - **Keep the cursor calm**: leave `ms` off — moves are timed by distance — and park it away from content while holding.
 - **Zoom sparingly**: auto-zoom covers typing (and click-then-hold with `clicks: true`); add a manual `d.zoom` only where it misses (it then takes over). One or two zooms per minute, 1.3–1.5×, on the moment that matters (a value changing, small text). Zoom out before a big move across the screen. A highlight is often enough.
-- Real timers keep running while frames render (~50–300 ms real time per frame), so timer-driven UI — toasts, debounced search, auto-dismissing tooltips — may disappear sooner in the video than in real life. Trigger them right before you want them on screen, or hold less.
+- Real timers keep running while frames render (~50–300 ms real time per frame), so timer-driven UI — toasts, debounced search, auto-dismissing tooltips — may disappear sooner in the video than in real life. Record with `clock: "hybrid"` to keep their real duration, or trigger them right before you want them on screen.
 
 ## Using the video
 
 - **PowerPoint**: Insert → Video → This Device. Playback tab: *Start: Automatically* and *Loop until Stopped*. H.264 `yuv420p` MP4 (what demo-reel writes) plays on Windows and macOS.
 - **Keynote**: drag in; Movie → Repeat: Loop.
 - **Web**: `<video src="demo.mp4" autoplay loop muted playsinline></video>`.
+- **Seamless loop**: `--loop` (or `loop: true` in the scenario; `--loop 800` / `loop: 800` for another length in ms) crossfades the last 500 ms into the first 500 ms, so a looping slide or `<video loop>` doesn't jump from the last frame to the first. The clip gets 500 ms shorter and starts 500 ms in; subtitles and audio shift with it. End the scenario near its start state (cursor parked where it began, caption cleared, same scroll and zoom) or the crossfade shows two screens ghosting over each other.
 - **GIF** (README, chat): `ffmpeg -i demo.mp4 -vf "fps=20,scale=960:-1:flags=lanczos,split[a][b];[a]palettegen[p];[b][p]paletteuse" demo.gif`
 - **Concatenate** clips of the same size/fps: `printf "file 'a.mp4'\nfile 'b.mp4'\n" > l.txt && ffmpeg -f concat -safe 0 -i l.txt -c copy both.mp4`
 
@@ -181,4 +189,5 @@ audio: {
 | Typed text flickers / letters hop | Fixed in v0.4.1: caret on the virtual clock, camera snaps when settled. Letters still re-render *during* a zoom move at the default render — use `render: 2`, or keep zooms slow and shallow. |
 | Text slightly soft | `--png` captures lossless frames (slower, larger). |
 | Blank or half-rastered tiles mid-zoom | Try `--capture beginframe` (see "Why the video is smooth" for what it breaks). |
+| `sheet.sh` reports frozen frames | A frame repeats the previous one mid-motion. Re-record; if it recurs at the same spot, try `--capture beginframe`. |
 | `--capture beginframe` has no effect | It's headless only: `--headed` Chrome has no BeginFrameControl and always uses screenshots. |

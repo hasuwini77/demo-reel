@@ -2,15 +2,16 @@
 // demo-reel — record a scripted walkthrough of a web app as a frame-exact MP4.
 //
 //   node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080]
-//                   [--crf 17] [--png] [--headed] [--capture screenshot|beginframe]
-//                   [--render 2]
+//                   [--crf 17] [--png] [--headed] [--preview] [--capture screenshot|beginframe]
+//                   [--loop [ms]] [--clock real|hybrid] [--render 2]
 //
 // Every frame is rendered at an exact 1/fps step of a virtual clock (see
 // inject.js), so the video is smooth no matter how slowly the page renders.
 // `--capture beginframe` (headless only) puts the compositor on that clock too:
 // each frame is produced on demand by HeadlessExperimental.beginFrame, so tile
 // raster and image decode can't lag the page. Opt-in: animated GIF/APNG freeze
-// and smooth scrolls jump under it (see SKILL.md).
+// and smooth scrolls jump under it (see SKILL.md). `--loop` crossfades the last
+// 500 ms (or `ms`) into the first so the clip loops without a jump.
 // `--render 2` rasters the page once at 2x and zooms by cropping + downscaling
 // the captured frame, so glyphs never re-hint during a zoom move (two-pass encode).
 import { chromium } from "playwright";
@@ -33,23 +34,35 @@ const flag = (name, def) => {
 };
 const scenarioPath = argv[0];
 if (!scenarioPath || scenarioPath.startsWith("--")) {
-    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed] [--capture screenshot|beginframe] [--render 2]");
+    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed] [--preview] [--capture screenshot|beginframe] [--loop [ms]] [--clock real|hybrid] [--render 2]");
     process.exit(1);
 }
 const mod = await import(pathToFileURL(path.resolve(scenarioPath)).href);
 const scenario = typeof mod.default === "function" ? { run: mod.default } : mod.default;
 
-const FPS = Number(flag("fps", scenario.fps ?? 60));
+// --preview: quick draft at the same viewport — 24 fps, lighter JPEG + x264.
+const PREVIEW = Boolean(flag("preview", false));
+const FPS = PREVIEW ? 24 : Number(flag("fps", scenario.fps ?? 60));
 const [OW, OH] = String(flag("size", scenario.size ?? "1920x1080")).split("x").map(Number);
 const OUT = path.resolve(flag("out", scenario.out ?? path.basename(scenarioPath).replace(/\.(scenario\.)?m?js$/, "") + ".mp4"));
-const CRF = String(flag("crf", 17));
-const PNG = Boolean(flag("png", false));
+const CRF = PREVIEW ? "28" : String(flag("crf", 17));
+const PNG = !PREVIEW && Boolean(flag("png", false));
 const DT = 1000 / FPS;
 const HEADED = Boolean(flag("headed", false));
 // Headed Chrome has no BeginFrameControl: it always uses Page.captureScreenshot.
 const BEGIN_FRAME = !HEADED && flag("capture", "screenshot") === "beginframe";
 // Supersampling: page rastered at RENDER x DPR; zooms become a crop of that frame.
 const RENDER = Math.max(1, Math.round(Number(flag("render", scenario.render ?? 1)) || 1));
+// Hybrid clock: setTimeout/setInterval of 16 ms or more and smooth scrolls run on
+// the virtual clock too (see inject.js). Opt-in.
+const CLOCK = String(flag("clock", scenario.clock ?? "real"));
+if (!["real", "hybrid"].includes(CLOCK)) {
+    console.error(`demo-reel: --clock must be real or hybrid, got ${CLOCK}`);
+    process.exit(1);
+}
+// Seamless loop: frames of crossfade between the end and the start (0 = off).
+const LOOP = flag("loop", scenario.loop ?? false);
+const LOOP_F = LOOP ? Math.round((LOOP === true ? 500 : Number(LOOP)) / DT) : 0;
 // Software WebGL so three.js / canvas scenes render headless.
 // Raw CDP screenshots ignore the context's emulated DPR; the switch makes them device px.
 const BASE_ARGS = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars",
@@ -144,6 +157,7 @@ const theme = {
     captionSize: 26,
     captionPosition: "bottom",
     badgeTop: 84,
+    keycaps: "mac",         // mac | win | false — keycap chip on d.press
     // One colour for halo, click effects and highlights.
     ...(userTheme.accent ? {
         haloFill: `color-mix(in srgb, ${userTheme.accent} 30%, transparent)`,
@@ -176,7 +190,9 @@ const context = await browser.newContext({
     locale: scenario.locale,
     colorScheme: scenario.colorScheme,
 });
-await context.addInitScript(readFileSync(path.join(HERE, "inject.js"), "utf8"));
+// theme.seed: inject.js swaps Math.random for a seeded PRNG, so takes repeat.
+const seedJs = theme.seed == null ? "" : `var __demoSeed = ${JSON.stringify(Number(theme.seed))};\n`;
+await context.addInitScript(`window.__demoClock = "${CLOCK}";\n` + seedJs + readFileSync(path.join(HERE, "inject.js"), "utf8"));
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
 
@@ -189,7 +205,7 @@ const encodeArgs = (pre) => [
         + `[p][1:v]overlay=0:0:shortest=1,format=yuv420p[outv]`,
         "-map", "[outv]",
     ] : ["-vf", `${pre}format=yuv420p`]),
-    "-c:v", "libx264", "-preset", "slow", "-crf", CRF, "-r", String(FPS),
+    "-c:v", "libx264", "-preset", PREVIEW ? "veryfast" : "slow", "-crf", CRF, "-r", String(FPS),
     "-color_range", "tv", "-movflags", "+faststart", "-an", OUT,
 ];
 const range = PNG ? "" : "scale=in_range=full:out_range=tv,";
@@ -208,13 +224,17 @@ const ffDone = new Promise((r) => ff.on("close", r));
 // ---------------------------------------------------------------- state + frame loop
 const state = {
     x: W / 2, y: H * 0.62, cursor: true, cursorStyle: theme.cursorStyle, pressed: false,
-    caption: null, badge: null, card: null, clickSeq: 0, highlights: [], cam: { x: 0, y: 0, z: 1 }, theme,
+    caption: null, badge: null, card: null, keycap: null, clickSeq: 0, highlights: [], cam: { x: 0, y: 0, z: 1 }, theme,
 };
 let frames = 0;
 let hlSeq = 0;
 const cues = [];          // voice clips: { at (ms), file, dur (ms) }
 let sayQueue = Promise.resolve();
 const subs = [];          // captions: { text, start, end } in ms, frame-exact
+const chapters = [];      // { title, start } in ms
+let posterFrame = null;
+let speed = 1;            // d.speed(k): page time per captured frame = DT·k
+const startedAt = Date.now();
 const sfx = [];           // { kind: "click" | "key", at (ms) }
 const sound = (kind) => { if (SFX?.[kind]) {sfx.push({ kind, at: now() });} };
 // Karaoke captions: word spans (absolute ms) of the spoken caption, lit as they pass.
@@ -360,6 +380,11 @@ async function applyCamera(scroll) {
 }
 
 async function tick(dt, capture) {
+    if (capture && state.keycap) {
+        // Keycap chip: 900 ms of video, quick fade in, soft fade out.
+        const age = now() - state.keycap.at;
+        if (age >= 900) {state.keycap = null;} else {state.keycap.o = Math.min(1, (age + DT) / 120, (900 - age) / 250);}
+    }
     if (capture && state.highlights.some((h) => h.until <= frames * DT)) {
         state.highlights = state.highlights.filter((h) => !(h.until <= frames * DT));
     }
@@ -367,23 +392,24 @@ async function tick(dt, capture) {
     if (capture) {stepCamera(dt);}
     if (capture && karaokeJob) { await karaokeJob.catch(() => {}); karaokeJob = null; }   // word times before the frame
     state.capLit = KARAOKE && karaoke?.text === state.caption ? karaoke.words.filter((w) => w.start <= now()).length : -1;
+    const pdt = capture ? dt * speed : dt;   // page time; d.speed fast-forwards it
     let scroll = [0, 0];
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
-            scroll = await page.evaluate(([dt, s]) => window.__demo?.tick(dt, s), [dt, state]) ?? scroll;
+            scroll = await page.evaluate(([dt, s]) => window.__demo?.tick(dt, s), [pdt, state]) ?? scroll;
             break;
         } catch {
             // Mid-navigation: wait for the new document (inject.js re-runs there).
             await page.waitForLoadState("domcontentloaded").catch(() => {});
         }
     }
-    clock += dt;
+    clock += pdt;
     if (!capture) {
         if (BEGIN_FRAME) {await beginFrame({});}
         return;
     }
     await applyCamera(scroll);
-    const format = PNG ? { format: "png" } : { format: "jpeg", quality: 92, optimizeForSpeed: true };
+    const format = PNG ? { format: "png" } : { format: "jpeg", quality: PREVIEW ? 75 : 92, optimizeForSpeed: true };
     let data;
     if (BEGIN_FRAME) {
         // No damage => no screenshot; the previous frame is still exact.
@@ -395,6 +421,17 @@ async function tick(dt, capture) {
     }
     if (!ff.stdin.write(Buffer.from(data, "base64"))) {await new Promise((r) => ff.stdin.once("drain", r));}
     frames++;
+}
+
+// "Control+K" → ["⌘", "K"] (mac) / ["Ctrl", "K"] (win).
+const KEYS = {
+    mac: { Control: "⌘", Meta: "⌘", ControlOrMeta: "⌘", Alt: "⌥", Shift: "⇧", Enter: "↩", Escape: "esc", Backspace: "⌫", Delete: "⌦", Tab: "⇥" },
+    win: { Control: "Ctrl", Meta: "Win", ControlOrMeta: "Ctrl", Escape: "Esc" },
+};
+const ARROWS = { ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→", " ": "Space" };
+function keycaps(key) {
+    const map = KEYS[theme.keycaps] ?? KEYS.mac;
+    return key.split(/\+(?!$)/).map((k) => map[k] ?? ARROWS[k] ?? (k.length === 1 ? k.toUpperCase() : k.replace(/^(Key|Digit)/, "")));
 }
 
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -434,12 +471,18 @@ async function point(target) {
 const d = {
     page, context, fps: FPS, width: W, height: H,
 
-    /** Record `ms` of the page as it is. */
+    /** Record `ms` of the page as it is (page time: under d.speed(k), ms/k of video). */
     async hold(ms) {
         if (auto.click && AUTO?.clicks && ms >= AUTO.minHold && inBody(auto.click)) {autoIn({ ...auto.click, width: 0, height: 0 });}
         auto.click = null;
-        for (let i = 0; i < Math.round(ms / DT); i++) {await tick(DT, true);}
+        for (let i = 0; i < Math.round(ms / (DT * speed)); i++) {await tick(DT, true);}
     },
+    /** Fast-forward: each recorded frame advances the page by DT·k. d.speed(1) resets. */
+    speed(k = 1) { speed = Math.max(Number(k) || 1, 1e-3); },
+    /** Use the next recorded frame as the poster (<out>.poster.jpg). */
+    poster() { posterFrame = frames; },
+    /** Start an MP4 chapter here (QuickTime / YouTube list them). */
+    chapter(title) { chapters.push({ title: String(title), start: now() }); },
     /** Advance time without recording (loading, layout settling). */
     async settle(ms = 1000) {
         for (let t = 0; t < ms; t += 50) { await tick(50, false); await page.waitForTimeout(20); }
@@ -453,18 +496,20 @@ const d = {
         // unrecorded scroll to the bottom and back. "instant", not "auto": auto
         // obeys a page's `scroll-behavior: smooth`.
         await page.evaluate(async (prewarm) => {
+            // Real timers: under the hybrid clock, page timers wait for ticks.
+            const wait = (ms) => new Promise((r) => (window.__demo?.realTimeout ?? setTimeout)(r, ms));
             const images = () => {
                 const imgs = [...document.images];
                 for (const i of imgs) {i.loading = "eager";}
                 const decoded = Promise.allSettled(imgs.map((i) => i.decode()));
-                return Promise.race([decoded, new Promise((r) => setTimeout(r, 5000))]);
+                return Promise.race([decoded, wait(5000)]);
             };
             await document.fonts.ready;
             await images();
             if (!prewarm) {return;}
             const { scrollX: x, scrollY: y } = window;
             window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
-            await new Promise((r) => setTimeout(r, 300));
+            await wait(300);
             await images();
             window.scrollTo({ left: x, top: y, behavior: "instant" });
             await document.fonts.ready;
@@ -533,7 +578,11 @@ const d = {
             if (auto.on) {auto.until = now() + AUTO.dwell;}
         }
     },
-    async press(key) { sound("key"); await page.keyboard.press(key); await tick(DT, true); },
+    /** Press a key or chord; shows it as keycaps above the caption (theme.keycaps). */
+    async press(key) {
+        if (theme.keycaps) {state.keycap = { caps: keycaps(key), at: now(), o: 0 };}
+        sound("key"); await page.keyboard.press(key); await tick(DT, true);
+    },
     /** Smooth wheel scroll by dy pixels. */
     async scroll(dy, { ms = 800 } = {}) {
         const n = Math.max(6, Math.round(ms / DT));
@@ -580,7 +629,10 @@ const d = {
         sayQueue = job.catch(() => {});
         if (lit) {karaokeJob = job;}
         if (!wait) {return job;}
-        return job.then(async (c) => { await d.hold(Math.max(0, c.at + c.dur + 200 - now())); return c; });
+        return job.then(async (c) => {
+            for (let i = 0; i < Math.round(Math.max(0, c.at + c.dur + 200 - now()) / DT); i++) {await tick(DT, true);}
+            return c;
+        });
     },
     /** Corner badge, e.g. d.badge("BEFORE", "#b91c1c"); null hides it. */
     badge(text, color = "#15803d") { state.badge = text ? { text, color } : null; },
@@ -683,7 +735,12 @@ const msPerFrame = ((performance.now() - t0) / Math.max(frames, 1)).toFixed(1);
 // ---------------------------------------------------------------- subtitles + audio
 // Subtitles from the caption cues; times are frame-exact by construction.
 const end = frames * DT;
-const lines = subs.map((c) => ({ ...c, end: Math.min(c.end ?? end, end) })).filter((c) => c.end > c.start);
+// --loop trims the first LOOP_F frames off the start (they end the clip, crossfaded).
+const loops = LOOP_F > 0 && frames >= 3 * LOOP_F;
+if (LOOP_F && !loops) {console.warn(`demo-reel: --loop skipped: the take is shorter than 3 × the ${Math.round(LOOP_F * DT)} ms crossfade`);}
+const cut = loops ? LOOP_F * DT : 0;
+const lines = subs.map((c) => ({ ...c, start: Math.max(0, c.start - cut), end: Math.min(c.end ?? end, end) - cut }))
+    .filter((c) => c.end > c.start);
 if (lines.length) {
     const ts = (ms, sep) => {
         const t = Math.round(ms), p = (n, w = 2) => String(n).padStart(w, "0");
@@ -741,5 +798,61 @@ if (cues.length || sfx.length || AUDIO.music) {
     renameSync(tmp, OUT);
     console.log(`demo-reel: audio mixed in: ${cues.length} voice clips, ${sfx.length} sounds${AUDIO.music ? ", music" : ""}`);
 }
+
+// Seamless loop: the clip starts LOOP_F frames in, and its last LOOP_F frames
+// crossfade into those first ones, so the last frame leads straight into frame 0.
+if (loops) {
+    const tmp = OUT.replace(/(\.[^.]+)?$/, ".loop$1");
+    const x = LOOP_F / FPS;
+    const graph = [
+        `[0:v]split[a][b];[a]trim=start_frame=${LOOP_F},setpts=PTS-STARTPTS[main];[b]trim=end_frame=${LOOP_F},setpts=PTS-STARTPTS[head]`,
+        `[main][head]xfade=transition=fade:duration=${x}:offset=${(frames - 2 * LOOP_F) / FPS},format=yuv420p[v]`,
+    ];
+    const audio = cues.length || sfx.length || AUDIO.music;
+    if (audio) {
+        graph.push(`[0:a]asplit[c][d];[c]atrim=start=${x},asetpts=PTS-STARTPTS[am];[d]atrim=end=${x},asetpts=PTS-STARTPTS[ah]`,
+            `[am][ah]acrossfade=d=${x}[a]`);
+    }
+    const code = await new Promise((r) => spawn("ffmpeg", [
+        "-y", "-loglevel", "error", "-i", OUT, "-filter_complex", graph.join(";"), "-map", "[v]",
+        ...(audio ? ["-map", "[a]", "-c:a", "aac", "-b:a", "160k"] : ["-an"]),
+        "-c:v", "libx264", "-preset", PREVIEW ? "veryfast" : "slow", "-crf", CRF, "-r", String(FPS), "-color_range", "tv", "-movflags", "+faststart", tmp,
+    ], { stdio: ["ignore", "inherit", "inherit"] }).on("close", r));
+    if (code !== 0) {throw new Error(`demo-reel: loop crossfade failed (ffmpeg exit ${code})`);}
+    renameSync(tmp, OUT);
+    frames -= LOOP_F;
+    for (const ch of chapters) {ch.start = Math.max(0, ch.start - cut);}
+    if (posterFrame != null) {posterFrame = Math.max(0, posterFrame - LOOP_F);}
+    console.log(`demo-reel: seamless loop: last ${LOOP_F} frames crossfade into the first`);
+}
+
+// Chapters, as ffmetadata stream-copied into the MP4.
+if (chapters.length) {
+    const esc = (t) => t.replace(/[=;#\\\n]/g, (c) => `\\${c}`);
+    const cs = chapters.filter((c) => c.start < frames * DT);
+    const meta = ";FFMETADATA1\n" + cs.map((c, i) => `[CHAPTER]\nTIMEBASE=1/1000\nSTART=${Math.round(c.start)}\n`
+        + `END=${Math.round(cs[i + 1]?.start ?? frames * DT)}\ntitle=${esc(c.title)}\n`).join("");
+    const metaPath = OUT.replace(/(\.[^.]+)?$/, ".chapters.txt");
+    const tmp = OUT.replace(/(\.[^.]+)?$/, ".chap$1");
+    writeFileSync(metaPath, meta);
+    const code = await new Promise((r) => spawn("ffmpeg", [
+        "-y", "-loglevel", "error", "-i", OUT, "-f", "ffmetadata", "-i", metaPath,
+        "-map", "0", "-map_chapters", "1", "-c", "copy", "-movflags", "+faststart", tmp,
+    ], { stdio: ["ignore", "inherit", "inherit"] }).on("close", r));
+    unlinkSync(metaPath);
+    if (code !== 0) {throw new Error(`demo-reel: chapter mux failed (ffmpeg exit ${code})`);}
+    renameSync(tmp, OUT);
+    console.log(`demo-reel: ${cs.length} chapters`);
+}
+
+// Poster: the marked frame as a JPEG next to the video.
+if (posterFrame != null && frames) {
+    const n = Math.min(posterFrame, frames - 1), jpg = OUT.replace(/\.[^.]+$/, "") + ".poster.jpg";
+    const code = await new Promise((r) => spawn("ffmpeg", [
+        "-y", "-loglevel", "error", "-i", OUT, "-vf", `select=eq(n\\,${n})`, "-frames:v", "1", "-q:v", "2", jpg,
+    ], { stdio: ["ignore", "inherit", "inherit"] }).on("close", r));
+    if (code !== 0) {throw new Error(`demo-reel: poster failed (ffmpeg exit ${code})`);}
+    console.log(`demo-reel: poster (frame ${n}) → ${jpg}`);
+}
 console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${OW}x${OH} → ${OUT}`
-    + ` (${BEGIN_FRAME ? "beginFrame" : "screenshot"}${RENDER > 1 ? `, render ${RENDER}` : ""}, ${msPerFrame} ms/frame)`);
+    + ` (${BEGIN_FRAME ? "beginFrame" : "screenshot"}${RENDER > 1 ? `, render ${RENDER}` : ""}, ${msPerFrame} ms/frame, ${((Date.now() - startedAt) / 1000).toFixed(1)} s total)`);
