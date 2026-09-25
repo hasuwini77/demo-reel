@@ -3,6 +3,7 @@
 //
 //   node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080]
 //                   [--crf 17] [--png] [--headed] [--capture screenshot|beginframe]
+//                   [--render 2]
 //
 // Every frame is rendered at an exact 1/fps step of a virtual clock (see
 // inject.js), so the video is smooth no matter how slowly the page renders.
@@ -10,6 +11,8 @@
 // each frame is produced on demand by HeadlessExperimental.beginFrame, so tile
 // raster and image decode can't lag the page. Opt-in: animated GIF/APNG freeze
 // and smooth scrolls jump under it (see SKILL.md).
+// `--render 2` rasters the page once at 2x and zooms by cropping + downscaling
+// the captured frame, so glyphs never re-hint during a zoom move (two-pass encode).
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
@@ -30,7 +33,7 @@ const flag = (name, def) => {
 };
 const scenarioPath = argv[0];
 if (!scenarioPath || scenarioPath.startsWith("--")) {
-    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed] [--capture screenshot|beginframe]");
+    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed] [--capture screenshot|beginframe] [--render 2]");
     process.exit(1);
 }
 const mod = await import(pathToFileURL(path.resolve(scenarioPath)).href);
@@ -45,8 +48,12 @@ const DT = 1000 / FPS;
 const HEADED = Boolean(flag("headed", false));
 // Headed Chrome has no BeginFrameControl: it always uses Page.captureScreenshot.
 const BEGIN_FRAME = !HEADED && flag("capture", "screenshot") === "beginframe";
+// Supersampling: page rastered at RENDER x DPR; zooms become a crop of that frame.
+const RENDER = Math.max(1, Math.round(Number(flag("render", scenario.render ?? 1)) || 1));
 // Software WebGL so three.js / canvas scenes render headless.
-const BASE_ARGS = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars"];
+// Raw CDP screenshots ignore the context's emulated DPR; the switch makes them device px.
+const BASE_ARGS = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars",
+    ...(RENDER > 1 ? [`--force-device-scale-factor=${RENDER}`] : [])];
 // Voice-over: provider is named by the scenario, checked before the take starts.
 const VOICE = scenario.voice ? await createVoice(scenario.voice) : null;
 // Music bed (ducked under the voice) and click / key sounds, all mixed after the take.
@@ -165,7 +172,7 @@ const platePath = FRAME ? await renderPlate(browser) : null;
 
 const context = await browser.newContext({
     viewport: { width: W, height: H },
-    deviceScaleFactor: 1,
+    deviceScaleFactor: RENDER,
     locale: scenario.locale,
     colorScheme: scenario.colorScheme,
 });
@@ -173,25 +180,28 @@ await context.addInitScript(readFileSync(path.join(HERE, "inject.js"), "utf8"));
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
 
+// The final encode; `pre` is the filter chain before the frame plate / pixel format.
+const encodeArgs = (pre) => [
+    ...(FRAME ? [
+        "-loop", "1", "-framerate", String(FPS), "-i", platePath,
+        "-filter_complex",
+        `[0:v]${pre}pad=${OW}:${OH}:${padX}:${padY}:color=black[p];`
+        + `[p][1:v]overlay=0:0:shortest=1,format=yuv420p[outv]`,
+        "-map", "[outv]",
+    ] : ["-vf", `${pre}format=yuv420p`]),
+    "-c:v", "libx264", "-preset", "slow", "-crf", CRF, "-r", String(FPS),
+    "-color_range", "tv", "-movflags", "+faststart", "-an", OUT,
+];
+const range = PNG ? "" : "scale=in_range=full:out_range=tv,";
+// Render > 1: the crop list is only complete when the take ends, so pass 1 keeps
+// the full-size frames losslessly and pass 2 crops, downscales and encodes.
+const PASS1 = RENDER > 1 ? path.join(os.tmpdir(), `demo-reel-${process.pid}.nut`) : null;
 const ffArgs = [
     "-y", "-loglevel", "error",
     "-f", "image2pipe", "-framerate", String(FPS), "-c:v", PNG ? "png" : "mjpeg", "-i", "-",
+    ...(PASS1 ? ["-vf", `${range}format=yuv444p`, "-c:v", "libx264", "-qp", "0", "-preset", "ultrafast", PASS1]
+        : encodeArgs(range)),
 ];
-if (FRAME) {
-    ffArgs.push(
-        "-loop", "1", "-framerate", String(FPS), "-i", platePath,
-        "-filter_complex",
-        `[0:v]${PNG ? "" : "scale=in_range=full:out_range=tv,"}pad=${OW}:${OH}:${padX}:${padY}:color=black[p];`
-        + `[p][1:v]overlay=0:0:shortest=1,format=yuv420p[outv]`,
-        "-map", "[outv]",
-    );
-} else {
-    ffArgs.push("-vf", `${PNG ? "" : "scale=in_range=full:out_range=tv,"}format=yuv420p`);
-}
-ffArgs.push(
-    "-c:v", "libx264", "-preset", "slow", "-crf", CRF, "-r", String(FPS),
-    "-color_range", "tv", "-movflags", "+faststart", "-an", OUT,
-);
 const ff = spawn("ffmpeg", ffArgs, { stdio: ["pipe", "inherit", "inherit"] });
 const ffDone = new Promise((r) => ff.on("close", r));
 
@@ -243,6 +253,8 @@ const pump = BEGIN_FRAME ? setInterval(() => {
 // 1→1.5 and 1.5→1 feel equally fast.
 const cam = { x: W / 2, y: H / 2, lz: 0, vx: 0, vy: 0, vz: 0, tx: W / 2, ty: H / 2, tlz: 0, w: 4.7, follow: false, cx: 0, cy: 0 };
 let emulated = false;
+const crops = [];         // render > 1: [frame, [w, h, x, y]] (device px) where the crop changes
+let lastCrop = [W * RENDER, H * RENDER, 0, 0].join(":");
 
 function spring(pos, vel, target, s, w = cam.w) {
     const d = pos - target, e = Math.exp(-w * s), k = (vel + w * d) * s;
@@ -275,8 +287,9 @@ function stepCamera(dt) {
     const zoom = Math.exp(cam.lz);
     const w = W / zoom, h = H / zoom;
     // Whole device pixels: a pan then shifts the raster instead of re-hinting glyphs.
-    const x = Math.round(Math.min(Math.max(cam.x - w / 2, 0), W - w) * zoom) / zoom;
-    const y = Math.round(Math.min(Math.max(cam.y - h / 2, 0), H - h) * zoom) / zoom;
+    const q = RENDER > 1 ? RENDER : zoom;
+    const x = Math.round(Math.min(Math.max(cam.x - w / 2, 0), W - w) * q) / q;
+    const y = Math.round(Math.min(Math.max(cam.y - h / 2, 0), H - h) * q) / q;
     state.cam = { x, y, z: zoom };
 }
 
@@ -324,6 +337,14 @@ const inBody = (p) => p.x > W * 0.15 && p.x < W * 0.85 && p.y > H * 0.12 && p.y 
 
 async function applyCamera(scroll) {
     const { x, y, z } = state.cam;
+    if (RENDER > 1) {
+        // No emulation: note this frame's crop rect (device px) for pass 2.
+        const R = RENDER, fw = W * R, fh = H * R;
+        const [w, h] = z > 1.0005 ? [Math.round(fw / z), Math.round(fh / z)] : [fw, fh];
+        const rect = [w, h, Math.min(Math.round(x * R), fw - w), Math.min(Math.round(y * R), fh - h)].join(":");
+        if (rect !== lastCrop) { crops.push([frames, rect.split(":")]); lastCrop = rect; }
+        return;
+    }
     const metrics = { width: W, height: H, deviceScaleFactor: 1, mobile: false, screenWidth: W, screenHeight: H };
     if (z > 1.0005) {
         // Re-rasters the visible area at the zoom (crisp, not upscaled). The page
@@ -626,15 +647,36 @@ const d = {
 };
 
 const t0 = performance.now();
+let taken = false;
 try {
     await scenario.run(d);
     await sayQueue;
+    taken = true;
 } finally {
     if (pump) {clearInterval(pump);}
     ff.stdin.end();
     await ffDone;
     await browser.close();
-    if (platePath) {try { unlinkSync(platePath); } catch { /* best effort */ }}
+    // Pass 2 still needs the plate and the lossless frames.
+    for (const f of PASS1 && taken ? [] : [platePath, PASS1]) {if (f) {try { unlinkSync(f); } catch { /* best effort */ }}}
+}
+
+// Pass 2 (render > 1): crop each frame to the camera (sendcmd), downscale, encode.
+if (PASS1) {
+    const cmdPath = PASS1.replace(/\.nut$/, ".cmd");
+    try {
+        let pre = `scale=${W}:${H}:flags=lanczos,`;
+        if (crops.length) {
+            writeFileSync(cmdPath, crops.map(([n, [w, h, x, y]]) =>
+                `${Math.max(0, (n - 0.5) / FPS).toFixed(6)} crop w ${w}, crop h ${h}, crop x ${x}, crop y ${y};`).join("\n"));
+            pre = `sendcmd=f=${cmdPath},crop=${W * RENDER}:${H * RENDER}:0:0:exact=1,${pre}`;
+        }
+        const code = await new Promise((r) => spawn("ffmpeg", ["-y", "-loglevel", "error", "-i", PASS1, ...encodeArgs(pre)],
+            { stdio: ["ignore", "inherit", "inherit"] }).on("close", r));
+        if (code !== 0) {throw new Error(`demo-reel: pass 2 encode failed (ffmpeg exit ${code})`);}
+    } finally {
+        for (const f of [PASS1, cmdPath, platePath]) {if (f) {try { unlinkSync(f); } catch { /* best effort */ }}}
+    }
 }
 const msPerFrame = ((performance.now() - t0) / Math.max(frames, 1)).toFixed(1);
 
@@ -700,4 +742,4 @@ if (cues.length || sfx.length || AUDIO.music) {
     console.log(`demo-reel: audio mixed in: ${cues.length} voice clips, ${sfx.length} sounds${AUDIO.music ? ", music" : ""}`);
 }
 console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${OW}x${OH} → ${OUT}`
-    + ` (${BEGIN_FRAME ? "beginFrame" : "screenshot"}, ${msPerFrame} ms/frame)`);
+    + ` (${BEGIN_FRAME ? "beginFrame" : "screenshot"}${RENDER > 1 ? `, render ${RENDER}` : ""}, ${msPerFrame} ms/frame)`);
