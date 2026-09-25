@@ -114,8 +114,8 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 - 🎞️ **Exact timing** — a 1.5 s hold is 90 frames, always; loading screens are skipped, not recorded; `d.speed(4)` fast-forwards long typing; `theme.seed` pins `Math.random` so takes repeat
 - 🔖 **Chapters, poster, preview** — `d.chapter("Filters")` muxes MP4 chapters, `d.poster()` writes a poster JPEG, `--preview` renders a quick 24 fps draft
 - 🧊 **WebGL / three.js / canvas** apps work (software rendering, still frame-exact)
-- 📦 **H.264 MP4, yuv420p** — plays and loops in PowerPoint and Keynote without conversion
-- 🧪 **A QA contact sheet** to check a take at a glance
+- 📦 **H.264 MP4, yuv420p** — plays and loops in PowerPoint and Keynote without conversion; `--loop` crossfades the end into the start so the loop has no jump
+- 🧪 **A QA contact sheet** to check a take at a glance, plus a jank report (frozen frames, hard cuts)
 
 ## API cheatsheet
 
@@ -153,7 +153,7 @@ The bundled example still ships too — `examples/tasks.scenario.mjs`, a small t
 
 ```bash
 node skills/demo-reel/scripts/record.mjs skills/demo-reel/examples/tasks.scenario.mjs --out tasks.mp4
-skills/demo-reel/scripts/sheet.sh tasks.mp4   # contact sheet for a quick look
+skills/demo-reel/scripts/sheet.sh tasks.mp4   # contact sheet + jank report
 ```
 
 ## How it works

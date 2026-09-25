@@ -2,14 +2,15 @@
 // demo-reel — record a scripted walkthrough of a web app as a frame-exact MP4.
 //
 //   node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080]
-//                   [--crf 17] [--png] [--headed] [--preview] [--capture screenshot|beginframe]
+//                   [--crf 17] [--png] [--headed] [--preview] [--capture screenshot|beginframe] [--loop [ms]]
 //
 // Every frame is rendered at an exact 1/fps step of a virtual clock (see
 // inject.js), so the video is smooth no matter how slowly the page renders.
 // `--capture beginframe` (headless only) puts the compositor on that clock too:
 // each frame is produced on demand by HeadlessExperimental.beginFrame, so tile
 // raster and image decode can't lag the page. Opt-in: animated GIF/APNG freeze
-// and smooth scrolls jump under it (see SKILL.md).
+// and smooth scrolls jump under it (see SKILL.md). `--loop` crossfades the last
+// 500 ms (or `ms`) into the first so the clip loops without a jump.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
@@ -30,7 +31,7 @@ const flag = (name, def) => {
 };
 const scenarioPath = argv[0];
 if (!scenarioPath || scenarioPath.startsWith("--")) {
-    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed] [--preview] [--capture screenshot|beginframe]");
+    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed] [--preview] [--capture screenshot|beginframe] [--loop [ms]]");
     process.exit(1);
 }
 const mod = await import(pathToFileURL(path.resolve(scenarioPath)).href);
@@ -47,6 +48,9 @@ const DT = 1000 / FPS;
 const HEADED = Boolean(flag("headed", false));
 // Headed Chrome has no BeginFrameControl: it always uses Page.captureScreenshot.
 const BEGIN_FRAME = !HEADED && flag("capture", "screenshot") === "beginframe";
+// Seamless loop: frames of crossfade between the end and the start (0 = off).
+const LOOP = flag("loop", scenario.loop ?? false);
+const LOOP_F = LOOP ? Math.round((LOOP === true ? 500 : Number(LOOP)) / DT) : 0;
 // Software WebGL so three.js / canvas scenes render headless.
 const BASE_ARGS = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars"];
 // Voice-over: provider is named by the scenario, checked before the take starts.
@@ -680,7 +684,12 @@ const msPerFrame = ((performance.now() - t0) / Math.max(frames, 1)).toFixed(1);
 // ---------------------------------------------------------------- subtitles + audio
 // Subtitles from the caption cues; times are frame-exact by construction.
 const end = frames * DT;
-const lines = subs.map((c) => ({ ...c, end: Math.min(c.end ?? end, end) })).filter((c) => c.end > c.start);
+// --loop trims the first LOOP_F frames off the start (they end the clip, crossfaded).
+const loops = LOOP_F > 0 && frames >= 3 * LOOP_F;
+if (LOOP_F && !loops) {console.warn(`demo-reel: --loop skipped: the take is shorter than 3 × the ${Math.round(LOOP_F * DT)} ms crossfade`);}
+const cut = loops ? LOOP_F * DT : 0;
+const lines = subs.map((c) => ({ ...c, start: Math.max(0, c.start - cut), end: Math.min(c.end ?? end, end) - cut }))
+    .filter((c) => c.end > c.start);
 if (lines.length) {
     const ts = (ms, sep) => {
         const t = Math.round(ms), p = (n, w = 2) => String(n).padStart(w, "0");
@@ -738,12 +747,40 @@ if (cues.length || sfx.length || AUDIO.music) {
     renameSync(tmp, OUT);
     console.log(`demo-reel: audio mixed in: ${cues.length} voice clips, ${sfx.length} sounds${AUDIO.music ? ", music" : ""}`);
 }
+
+// Seamless loop: the clip starts LOOP_F frames in, and its last LOOP_F frames
+// crossfade into those first ones, so the last frame leads straight into frame 0.
+if (loops) {
+    const tmp = OUT.replace(/(\.[^.]+)?$/, ".loop$1");
+    const x = LOOP_F / FPS;
+    const graph = [
+        `[0:v]split[a][b];[a]trim=start_frame=${LOOP_F},setpts=PTS-STARTPTS[main];[b]trim=end_frame=${LOOP_F},setpts=PTS-STARTPTS[head]`,
+        `[main][head]xfade=transition=fade:duration=${x}:offset=${(frames - 2 * LOOP_F) / FPS},format=yuv420p[v]`,
+    ];
+    const audio = cues.length || sfx.length || AUDIO.music;
+    if (audio) {
+        graph.push(`[0:a]asplit[c][d];[c]atrim=start=${x},asetpts=PTS-STARTPTS[am];[d]atrim=end=${x},asetpts=PTS-STARTPTS[ah]`,
+            `[am][ah]acrossfade=d=${x}[a]`);
+    }
+    const code = await new Promise((r) => spawn("ffmpeg", [
+        "-y", "-loglevel", "error", "-i", OUT, "-filter_complex", graph.join(";"), "-map", "[v]",
+        ...(audio ? ["-map", "[a]", "-c:a", "aac", "-b:a", "160k"] : ["-an"]),
+        "-c:v", "libx264", "-preset", PREVIEW ? "veryfast" : "slow", "-crf", CRF, "-r", String(FPS), "-color_range", "tv", "-movflags", "+faststart", tmp,
+    ], { stdio: ["ignore", "inherit", "inherit"] }).on("close", r));
+    if (code !== 0) {throw new Error(`demo-reel: loop crossfade failed (ffmpeg exit ${code})`);}
+    renameSync(tmp, OUT);
+    frames -= LOOP_F;
+    for (const ch of chapters) {ch.start = Math.max(0, ch.start - cut);}
+    if (posterFrame != null) {posterFrame = Math.max(0, posterFrame - LOOP_F);}
+    console.log(`demo-reel: seamless loop: last ${LOOP_F} frames crossfade into the first`);
+}
+
 // Chapters, as ffmetadata stream-copied into the MP4.
 if (chapters.length) {
     const esc = (t) => t.replace(/[=;#\\\n]/g, (c) => `\\${c}`);
-    const cs = chapters.filter((c) => c.start < end);
+    const cs = chapters.filter((c) => c.start < frames * DT);
     const meta = ";FFMETADATA1\n" + cs.map((c, i) => `[CHAPTER]\nTIMEBASE=1/1000\nSTART=${Math.round(c.start)}\n`
-        + `END=${Math.round(cs[i + 1]?.start ?? end)}\ntitle=${esc(c.title)}\n`).join("");
+        + `END=${Math.round(cs[i + 1]?.start ?? frames * DT)}\ntitle=${esc(c.title)}\n`).join("");
     const metaPath = OUT.replace(/(\.[^.]+)?$/, ".chapters.txt");
     const tmp = OUT.replace(/(\.[^.]+)?$/, ".chap$1");
     writeFileSync(metaPath, meta);
