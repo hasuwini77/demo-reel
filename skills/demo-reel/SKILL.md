@@ -1,6 +1,6 @@
 ---
 name: demo-reel
-description: Record a smooth, frame-exact 60 fps demo video of any web app from a short script — scripted cursor (arrow, hand, dot…) with a halo, click effects, smooth zooms, highlighters (box, circle, spotlight, marker), captions and a corner badge, rendered on a virtual clock so it never stutters, encoded to an MP4 that loops in PowerPoint, Keynote or on the web. Use when the user wants a demo video, product walkthrough, screen recording, feature tour, before/after comparison video, a clip for a slide deck or landing page, or says "record the app", "make a video of", "screen capture", "show how it feels", "demo reel". Also for turning a Playwright flow into a video or making an existing recording smoother (60 fps).
+description: Record a smooth, frame-exact 60 fps demo video of any web app from a short script — scripted cursor (arrow, hand, dot…) with a halo, click effects, smooth zooms, highlighters (box, circle, spotlight, marker), callouts, title and end cards, captions and a corner badge, rendered on a virtual clock so it never stutters, encoded to an MP4 that loops in PowerPoint, Keynote or on the web. Use when the user wants a demo video, product walkthrough, screen recording, feature tour, before/after comparison video, a clip for a slide deck or landing page, or says "record the app", "make a video of", "screen capture", "show how it feels", "demo reel". Also for turning a Playwright flow into a video or making an existing recording smoother (60 fps).
 ---
 
 # demo-reel
@@ -49,8 +49,10 @@ export default {
     await d.type("Stockholm");                  // human-speed typing
     await d.press("Enter");
     await d.highlight(".results", { style: "box", ms: 1500 });
+    await d.callout(".filters", "Filters live here", { ms: 1500 });
     await d.zoom(null);                         // ease back out
     await d.scroll(600);                        // smooth wheel scroll
+    await d.card({ title: "Try it", subtitle: "example.com" }); // title / end card
     await d.step("optional part", async () => { /* failures are logged, recording continues */ });
   },
 };
@@ -58,10 +60,10 @@ export default {
 
 | Call | Does |
 |---|---|
-| `d.open(url, { settle })` | Navigate, let the page settle (unrecorded, default 2500 ms). |
+| `d.open(url, { settle, prewarm })` | Navigate, let the page settle (unrecorded, default 2500 ms), wait for fonts, load + decode every image; `prewarm` (default on) scrolls to the bottom and back unrecorded so lazy content is in before the first recorded scroll. |
 | `d.hold(ms)` | Record the page as it is. |
 | `d.settle(ms)` | Advance time **without** recording — skip loading states, lazy chunks, layout animations you don't want to show. |
-| `d.move(target, { ms })` / `d.hover` | Glide the cursor (eased) to a target. |
+| `d.move(target, { ms })` / `d.hover` | Glide the cursor to a target. Without `ms` the duration follows the distance (320–1100 ms); spring-eased, slightly arced, motion-blurred. |
 | `d.click(target, { ms, button })` | Move, click with a ripple. `button: "right"` for context menus. |
 | `d.doubleClick(target)` | Double click. |
 | `d.type(text, { delay })` | Type one key at a time (default 90 ms/key). |
@@ -69,11 +71,14 @@ export default {
 | `d.scroll(dy, { ms })` | Smooth wheel scroll. |
 | `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
 | `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
+| `d.callout(target, text, { side, color, ms })` | Label a target: a caption-style pill beside it, a leader line and a dot on its edge. `side` `auto` (the side with the most room) · `top` · `right` · `bottom` · `left`. Zooms with the page. Clears after `ms`, or with `d.callout(null)`. |
+| `d.card({ title, subtitle, ms, bg, align })` | Full-frame title or end card over the page (not zoomed): 350 ms fade in, `ms` shown (2500), 350 ms fade out, cursor hidden. `bg` any CSS background (`#0f172a`), `align` `center` · `left`. |
 | `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. `d.cursor("hand")` switches shape mid-take. |
+| `d.say(text, { wait })` | Voice-over from this frame (needs `voice`, see Voice-over). Returns `{ at, dur }` at once; `wait: true` holds until the clip ends. |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
 
-**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`.
+**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `cursorMotion` (`{ spring, arc, blur }`, all on; `false` turns all off — cubic ease, straight line, no blur), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`.
 
 **Frame**: `frame: true` sits the page in a rounded window with a soft shadow, inset on a wallpaper/gradient — omit it and output is unchanged. It costs nothing per frame (one plate image, composited by ffmpeg), and pairs well with zoom — the window stays put while the camera moves inside it.
 
@@ -102,6 +107,47 @@ const node = (label) => (page) => page.evaluate((label) => {
 await d.click(node("Server A"));
 ```
 
+## Voice-over
+
+Name a provider and the take gets an audio track; captions also become subtitles. Nothing is spoken unless the scenario names a provider — there is no key auto-detection, because cloud providers send the text off the machine.
+
+```js
+export default {
+  voice: { provider: "kokoro", voice: "af_heart", speed: 1, captions: true }, // captions: true speaks every d.caption
+  async run(d) {
+    await d.say("Filters live in one panel.");                 // starts at this frame, doesn't hold
+    await d.say("Results update as you type.", { wait: true }); // holds until the clip ends (+200 ms)
+  },
+};
+```
+
+| `provider` | Needs | Defaults |
+|---|---|---|
+| `kokoro` | `npm i kokoro-js` in the skill folder (~830 MB, CPU only; not installed by default). First use downloads the model (~80 MB). Local, free. | voice `af_heart`, `dtype: "q8"` |
+| `elevenlabs` | `ELEVENLABS_API_KEY` in the environment | model `eleven_flash_v2_5` (`eleven_multilingual_v2` for quality), `voice` = voice id |
+| `openai` | `OPENAI_API_KEY` in the environment | model `gpt-4o-mini-tts`, voice `alloy` |
+| `piper` | `piper` on PATH, `model: "path/to/voice.onnx"` | — |
+| `command` | `command: "my-tts --out {out} {text}"` (split on spaces, no shell) | writes a WAV to `{out}` |
+
+- Keys are read from the environment only — never pass them as CLI arguments; they are never logged.
+- Synthesis happens between frames, so it costs no video time. Clips are cached in `.demo-reel-cache/voice/` by provider, voice, model, speed and text: a re-take re-bills and re-synthesizes nothing (`voice: cache hit`).
+- Clips never overlap: one that would start within 150 ms of the previous clip's end is moved later, with a warning. Give long lines `wait: true` or a longer `d.hold`.
+- The clips are mixed under the untouched video (`-c:v copy`, AAC 160k, 48 kHz). No voice → the MP4 stays silent, as before.
+- **Subtitles**: every take with captions also writes `<out>.srt` and `<out>.vtt` next to the MP4 — a line starts on the frame the caption was set and ends when it is replaced or cleared.
+- **Karaoke captions**: `theme: { captionStyle: "karaoke" }` lights each caption word as it is spoken (a caption spoken by `voice.captions` or by `d.say` with the same text; unspoken captions show fully lit). ElevenLabs gives real word times (`/with-timestamps`); other providers are estimated by character count.
+
+### Music and sound effects
+
+```js
+audio: {
+  music: "bed.mp3", musicVolume: 0.18, duck: true, // looped, 1 s fade in / 1.5 s out, ducked under the voice
+  sfx: true,                                        // or { click: true, key: true, volume: 0.4 }
+},
+```
+
+- No music is shipped — bring your own licensed track. `duck` (default on) compresses the music while the voice speaks (sidechain compressor, ratio 8).
+- Click and keystroke sounds are generated by ffmpeg (no audio assets) and land on the click / key frame.
+
 ## Writing good demos
 
 - **Captions tell the truth.** Only claim what the footage shows. If a bug you want to show doesn't reproduce in the take, change the caption — don't keep it.
@@ -109,7 +155,7 @@ await d.click(node("Server A"));
 - **Show outcomes, not clicks.** Hold 1–2 s on every result; cut loading with `d.settle`.
 - **Before/after**: record two scenarios with the same story and steps, badge `BEFORE`/`AFTER` (red/green), and keep them separate files plus an optional concatenation.
 - **Hero moments** (a landing page, an animation): give them 5–10 s — viewers need a moment to take it in.
-- **Keep the cursor calm**: 600–900 ms per move, park it away from content while holding.
+- **Keep the cursor calm**: leave `ms` off — moves are timed by distance — and park it away from content while holding.
 - **Zoom sparingly**: auto-zoom covers typing (and click-then-hold with `clicks: true`); add a manual `d.zoom` only where it misses (it then takes over). One or two zooms per minute, 1.3–1.5×, on the moment that matters (a value changing, small text). Zoom out before a big move across the screen. A highlight is often enough.
 - Real timers keep running while frames render (~50–300 ms real time per frame), so timer-driven UI — toasts, debounced search, auto-dismissing tooltips — may disappear sooner in the video than in real life. Trigger them right before you want them on screen, or hold less.
 

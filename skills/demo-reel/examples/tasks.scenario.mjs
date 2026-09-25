@@ -13,6 +13,7 @@ export default {
     async run(d) {
         const { page } = d;
         await d.open(app);
+        await d.card({ title: "Tasks", subtitle: "A quick tour", ms: 1800 });
         d.badge("DEMO", "#4f46e5");
         d.caption("A small task app");
         await d.hold(1500);
@@ -22,6 +23,8 @@ export default {
             d.caption("Add a task");
             await d.type("Ship the demo video");
             await d.hold(300);
+            await d.callout(page.getByRole("button", { name: "Add" }), "Adds it to the top", { ms: 1400 });
+            await d.hold(1400);
             await d.click(page.getByRole("button", { name: "Add" }));
             await d.hold(1200);
         });
@@ -51,5 +54,6 @@ export default {
         d.caption(null);
         await d.move({ x: d.width * 0.5, y: d.height * 0.8 }, { ms: 900 });
         await d.hold(800);
+        await d.card({ title: "Try it", subtitle: "examples/tasks/index.html" });
     },
 };

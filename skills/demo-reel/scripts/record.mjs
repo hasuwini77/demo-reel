@@ -12,10 +12,11 @@
 // and smooth scrolls jump under it (see SKILL.md).
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { createVoice } from "./voice.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -46,6 +47,12 @@ const HEADED = Boolean(flag("headed", false));
 const BEGIN_FRAME = !HEADED && flag("capture", "screenshot") === "beginframe";
 // Software WebGL so three.js / canvas scenes render headless.
 const BASE_ARGS = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars"];
+// Voice-over: provider is named by the scenario, checked before the take starts.
+const VOICE = scenario.voice ? await createVoice(scenario.voice) : null;
+// Music bed (ducked under the voice) and click / key sounds, all mixed after the take.
+const AUDIO = scenario.audio ?? {};
+const sfxCfg = AUDIO.sfx === true ? {} : AUDIO.sfx || null;
+const SFX = sfxCfg ? { click: true, key: true, volume: 0.4, ...sfxCfg } : null;
 
 // ---------------------------------------------------------------- styled frame
 // `frame` puts the page in a rounded window, inset on a background, with a soft
@@ -137,6 +144,11 @@ const theme = {
     } : {}),
     ...userTheme,
 };
+// Cursor physics, each switchable; `cursorMotion: false` turns all three off.
+theme.cursorMotion = {
+    spring: true, arc: true, blur: true,
+    ...(userTheme.cursorMotion === false ? { spring: false, arc: false, blur: false } : userTheme.cursorMotion),
+};
 
 // ---------------------------------------------------------------- browser + encoder
 const browser = await chromium.launch({
@@ -186,10 +198,18 @@ const ffDone = new Promise((r) => ff.on("close", r));
 // ---------------------------------------------------------------- state + frame loop
 const state = {
     x: W / 2, y: H * 0.62, cursor: true, cursorStyle: theme.cursorStyle, pressed: false,
-    caption: null, badge: null, clickSeq: 0, highlights: [], cam: { x: 0, y: 0, z: 1 }, theme,
+    caption: null, badge: null, card: null, clickSeq: 0, highlights: [], cam: { x: 0, y: 0, z: 1 }, theme,
 };
 let frames = 0;
 let hlSeq = 0;
+const cues = [];          // voice clips: { at (ms), file, dur (ms) }
+let sayQueue = Promise.resolve();
+const subs = [];          // captions: { text, start, end } in ms, frame-exact
+const sfx = [];           // { kind: "click" | "key", at (ms) }
+const sound = (kind) => { if (SFX?.[kind]) {sfx.push({ kind, at: now() });} };
+// Karaoke captions: word spans (absolute ms) of the spoken caption, lit as they pass.
+const KARAOKE = theme.captionStyle === "karaoke";
+let karaoke = null, karaokeJob = null;
 
 // ---------------------------------------------------------------- begin frames
 // frameTimeTicks follows the virtual clock (captured and settle ticks alike) and
@@ -224,9 +244,9 @@ const pump = BEGIN_FRAME ? setInterval(() => {
 const cam = { x: W / 2, y: H / 2, lz: 0, vx: 0, vy: 0, vz: 0, tx: W / 2, ty: H / 2, tlz: 0, w: 4.7, follow: false, cx: 0, cy: 0 };
 let emulated = false;
 
-function spring(pos, vel, target, s) {
-    const d = pos - target, e = Math.exp(-cam.w * s), k = (vel + cam.w * d) * s;
-    return [target + (d + k) * e, (vel - cam.w * k) * e];
+function spring(pos, vel, target, s, w = cam.w) {
+    const d = pos - target, e = Math.exp(-w * s), k = (vel + w * d) * s;
+    return [target + (d + k) * e, (vel - w * k) * e];
 }
 
 function stepCamera(dt) {
@@ -324,6 +344,8 @@ async function tick(dt, capture) {
     }
     if (capture && auto.on && !auto.typing && now() > auto.until) {autoOut();}
     if (capture) {stepCamera(dt);}
+    if (capture && karaokeJob) { await karaokeJob.catch(() => {}); karaokeJob = null; }   // word times before the frame
+    state.capLit = KARAOKE && karaoke?.text === state.caption ? karaoke.words.filter((w) => w.start <= now()).length : -1;
     let scroll = [0, 0];
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -356,6 +378,21 @@ async function tick(dt, capture) {
 
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
+// ---------------------------------------------------------------- cursor path
+// A move lasts longer the further it goes, rides the camera's spring (quick off
+// the mark, long soft landing) and bows slightly, like a hand on a mouse.
+const moveMs = (dist) => Math.min(Math.max(260 + dist * 0.55, 320), 1100);
+
+/** Progress 0→1 on each of n frames. The spring only approaches its target, so
+ * it is stepped to ~99 % and rescaled to land exactly on the last frame. */
+function springProgress(n) {
+    const w = 7 / ((n * DT) / 1000);
+    const ks = [];
+    let p = 0, v = 0;
+    for (let i = 0; i < n; i++) { [p, v] = spring(p, v, 1, DT / 1000, w); ks.push(p); }
+    return ks.map((k) => k / p);
+}
+
 /** Box of a target, in viewport px. A point ({x, y}) is a zero-size box. */
 async function rect(target) {
     if (target == null) {return { x: state.x, y: state.y, width: 0, height: 0 };}
@@ -387,22 +424,48 @@ const d = {
         for (let t = 0; t < ms; t += 50) { await tick(50, false); await page.waitForTimeout(20); }
     },
     /** Navigate, then settle before the next recorded frame. */
-    async open(url, { settle = 2500 } = {}) {
+    async open(url, { settle = 2500, prewarm = true } = {}) {
         await page.goto(url);
         await d.settle(settle);
+        // No pop-in once recording starts: fonts loaded, every image fetched and
+        // decoded, and (prewarm) lazy content below the fold triggered by a quick
+        // unrecorded scroll to the bottom and back. "instant", not "auto": auto
+        // obeys a page's `scroll-behavior: smooth`.
+        await page.evaluate(async (prewarm) => {
+            const images = () => {
+                const imgs = [...document.images];
+                for (const i of imgs) {i.loading = "eager";}
+                const decoded = Promise.allSettled(imgs.map((i) => i.decode()));
+                return Promise.race([decoded, new Promise((r) => setTimeout(r, 5000))]);
+            };
+            await document.fonts.ready;
+            await images();
+            if (!prewarm) {return;}
+            const { scrollX: x, scrollY: y } = window;
+            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+            await new Promise((r) => setTimeout(r, 300));
+            await images();
+            window.scrollTo({ left: x, top: y, behavior: "instant" });
+            await document.fonts.ready;
+        }, prewarm).catch((e) => console.warn(`demo-reel: prewarm skipped: ${String(e.message).split("\n")[0]}`));
+        await d.settle(250);
         await page.mouse.move(state.x, state.y);
     },
     /** Glide the cursor to a target (selector, Locator, {x,y} or async (page) => {x,y}). */
-    async move(target, { ms = 650 } = {}) {
+    async move(target, { ms } = {}) {
         const p = await point(target);
-        const n = Math.max(6, Math.round(ms / DT));
-        const x0 = state.x, y0 = state.y;
+        const x0 = state.x, y0 = state.y, dx = p.x - x0, dy = p.y - y0, dist = Math.hypot(dx, dy);
+        const n = Math.max(6, Math.round((ms ?? moveMs(dist)) / DT));
+        const motion = theme.cursorMotion;
+        const ks = motion.spring ? springProgress(n) : Array.from({ length: n }, (_, i) => ease((i + 1) / n));
+        // Arc: bulge along the perpendicular on the upper side, peaking mid-move.
+        const bow = motion.arc && dist ? (Math.min(dist * 0.06, 40) / dist) * (dx < 0 ? -1 : 1) : 0;
         auto.click = null;
-        if (Math.hypot(p.x - x0, p.y - y0) > Math.hypot(W, H) * 0.3) {autoOut();}
-        for (let i = 1; i <= n; i++) {
-            const k = ease(i / n);
-            state.x = x0 + (p.x - x0) * k;
-            state.y = y0 + (p.y - y0) * k;
+        if (dist > Math.hypot(W, H) * 0.3) {autoOut();}
+        for (const k of ks) {
+            const b = Math.sin(Math.PI * k) * bow;
+            state.x = x0 + dx * k + dy * b;
+            state.y = y0 + dy * k - dx * b;
             // With beginFrame the move is only acknowledged by a frame: draw it now.
             const moved = page.mouse.move(state.x, state.y);
             if (!BEGIN_FRAME) {await moved;}
@@ -412,10 +475,11 @@ const d = {
     },
     async hover(target, opts) { await d.move(target, opts); },
     /** Move, then click with a ripple. `button: "right"` for context menus. */
-    async click(target, { ms = 650, button = "left", pause = 80 } = {}) {
+    async click(target, { ms, button = "left", pause = 80 } = {}) {
         await d.move(target, { ms });
         await d.hold(pause);
         state.clickSeq++;
+        sound("click");
         state.pressed = true;
         await page.mouse.down({ button });
         await tick(DT, true); await tick(DT, true);
@@ -427,6 +491,7 @@ const d = {
     async doubleClick(target, opts = {}) {
         await d.click(target, opts);
         state.clickSeq++;
+        sound("click");
         await page.mouse.click(state.x, state.y, { button: opts.button ?? "left", clickCount: 2 });
         await tick(DT, true);
     },
@@ -441,13 +506,13 @@ const d = {
         if (field) {autoIn(field);}
         auto.typing = true;
         try {
-            for (const ch of text) { await page.keyboard.type(ch); await d.hold(delay); }
+            for (const ch of text) { sound("key"); await page.keyboard.type(ch); await d.hold(delay); }
         } finally {
             auto.typing = false;
             if (auto.on) {auto.until = now() + AUTO.dwell;}
         }
     },
-    async press(key) { await page.keyboard.press(key); await tick(DT, true); },
+    async press(key) { sound("key"); await page.keyboard.press(key); await tick(DT, true); },
     /** Smooth wheel scroll by dy pixels. */
     async scroll(dy, { ms = 800 } = {}) {
         const n = Math.max(6, Math.round(ms / DT));
@@ -460,7 +525,42 @@ const d = {
         }
     },
     /** Caption pill (null hides it). Set it *after* the action it describes. */
-    caption(text) { state.caption = text || null; },
+    caption(text) {
+        state.caption = text || null;
+        const last = subs.at(-1);
+        if (last && last.end == null) {last.end = now();}
+        if (text) {subs.push({ text, start: now(), end: null });}
+        // voice.captions: speak every caption too (non-blocking, errors only warn).
+        if (text && VOICE && scenario.voice.captions) {
+            d.say(text).catch((e) => console.warn(String(e.message)));
+        }
+    },
+    /**
+     * Speak `text` from this frame on. Synthesis runs between frames, so it costs
+     * no video time; returns { at, dur } in ms. `wait: true` holds until the clip
+     * ends (+200 ms). A clip that would overlap the previous one is pushed later.
+     */
+    say(text, { wait = false } = {}) {
+        if (!VOICE) {throw new Error("demo-reel: d.say needs `voice: { provider }` in the scenario");}
+        const at0 = now();
+        const lit = KARAOKE && state.caption === text;
+        const job = sayQueue.then(async () => {
+            const { file, dur, words } = await VOICE.synth(text);
+            const prev = cues.at(-1);
+            let at = at0;
+            if (prev && at < prev.at + prev.dur + 150) {
+                at = prev.at + prev.dur + 150;
+                console.warn(`voice: "${text.slice(0, 40)}" overlaps the previous clip, moved ${Math.round(at - at0)} ms later`);
+            }
+            cues.push({ at, file, dur });
+            if (lit) {karaoke = { text, words: words.map((w) => ({ start: at + w.start, end: at + w.end })) };}
+            return { at, dur };
+        });
+        sayQueue = job.catch(() => {});
+        if (lit) {karaokeJob = job;}
+        if (!wait) {return job;}
+        return job.then(async (c) => { await d.hold(Math.max(0, c.at + c.dur + 200 - now())); return c; });
+    },
     /** Corner badge, e.g. d.badge("BEFORE", "#b91c1c"); null hides it. */
     badge(text, color = "#15803d") { state.badge = text ? { text, color } : null; },
     /** true/false shows/hides the cursor; a name switches its shape (arrow, mac, hand, ibeam, dot, auto). */
@@ -488,6 +588,36 @@ const d = {
             until: ms ? frames * DT + ms : Infinity,
         }];
     },
+    /**
+     * Label a target: a caption-style pill beside it, joined by a leader line to a
+     * dot on its edge. `side` "auto" picks the side with the most room. Clears
+     * after `ms`, or with `d.callout(null)`; zooms with the page like highlights.
+     */
+    async callout(target, text, { side = "auto", color = theme.haloStroke, ms } = {}) {
+        if (target == null) { state.highlights = state.highlights.filter((h) => h.style !== "callout"); return; }
+        const r = await rect(target);
+        if (side === "auto") {
+            const room = { right: W - r.x - r.width, left: r.x, bottom: H - r.y - r.height, top: r.y };
+            side = Object.keys(room).reduce((a, b) => (room[b] > room[a] ? b : a));
+        }
+        state.highlights = [...state.highlights, {
+            id: ++hlSeq, style: "callout", text, side, color, pad: 0, x: r.x, y: r.y, w: r.width, h: r.height,
+            until: ms ? frames * DT + ms : Infinity,
+        }];
+    },
+    /**
+     * Full-frame title / end card over the page (not zoomed): fades in, stays
+     * `ms`, fades out, 350 ms each way on the virtual clock. Cursor hidden meanwhile.
+     */
+    async card({ title, subtitle, ms = 2500, bg = "#0f172a", align = "center" } = {}) {
+        const cursor = state.cursor;
+        state.cursor = false;
+        state.card = { title, subtitle, bg, align };
+        await d.hold(350 + ms);
+        state.card = null;
+        await d.hold(350);
+        state.cursor = cursor;
+    },
     /** Run a named step; a failure is logged and the recording continues. */
     async step(name, fn) {
         try { await fn(); } catch (e) { console.warn(`step "${name}" failed: ${String(e.message).split("\n")[0]}`); }
@@ -498,6 +628,7 @@ const d = {
 const t0 = performance.now();
 try {
     await scenario.run(d);
+    await sayQueue;
 } finally {
     if (pump) {clearInterval(pump);}
     ff.stdin.end();
@@ -506,5 +637,67 @@ try {
     if (platePath) {try { unlinkSync(platePath); } catch { /* best effort */ }}
 }
 const msPerFrame = ((performance.now() - t0) / Math.max(frames, 1)).toFixed(1);
+
+// ---------------------------------------------------------------- subtitles + audio
+// Subtitles from the caption cues; times are frame-exact by construction.
+const end = frames * DT;
+const lines = subs.map((c) => ({ ...c, end: Math.min(c.end ?? end, end) })).filter((c) => c.end > c.start);
+if (lines.length) {
+    const ts = (ms, sep) => {
+        const t = Math.round(ms), p = (n, w = 2) => String(n).padStart(w, "0");
+        return `${p(Math.floor(t / 3600000))}:${p(Math.floor(t / 60000) % 60)}:${p(Math.floor(t / 1000) % 60)}${sep}${p(t % 1000, 3)}`;
+    };
+    const base = OUT.replace(/\.[^.]+$/, "");
+    writeFileSync(`${base}.srt`, lines.map((c, i) => `${i + 1}\n${ts(c.start, ",")} --> ${ts(c.end, ",")}\n${c.text}\n`).join("\n"));
+    writeFileSync(`${base}.vtt`, `WEBVTT\n\n${lines.map((c) => `${ts(c.start, ".")} --> ${ts(c.end, ".")}\n${c.text}\n`).join("\n")}`);
+    console.log(`demo-reel: ${lines.length} subtitles → ${base}.srt / .vtt`);
+}
+
+// Voice clips and sounds, each delayed to its frame, plus the music bed, mixed
+// under the untouched video. Sounds are generated by ffmpeg (lavfi), no assets.
+if (cues.length || sfx.length || AUDIO.music) {
+    const tmp = OUT.replace(/(\.[^.]+)?$/, ".voice$1");
+    const inputs = [], graph = [], mix = [];
+    const input = (...args) => { inputs.push(...args); return inputs.filter((a) => a === "-i").length; };
+    if (cues.length) {
+        cues.forEach((c, i) => graph.push(`[${input("-i", c.file)}:a]adelay=${Math.round(c.at)}:all=1[v${i}]`));
+        graph.push(`${cues.map((_, i) => `[v${i}]`).join("")}amix=inputs=${cues.length}:normalize=0:dropout_transition=0,asplit=2[voice][vkey]`);
+        mix.push("[voice]");
+    }
+    const SOUNDS = {
+        click: "sine=f=1200:d=0.025:r=48000,afade=t=out:st=0.005:d=0.02",
+        key: "anoisesrc=d=0.03:c=white:r=48000:a=0.5,bandpass=f=3500:width_type=h:w=3000,afade=t=out:st=0.005:d=0.025",
+    };
+    for (const kind of Object.keys(SOUNDS)) {
+        const at = sfx.filter((c) => c.kind === kind).map((c) => Math.round(c.at));
+        if (!at.length) {continue;}
+        const i = input("-f", "lavfi", "-i", SOUNDS[kind]);
+        graph.push(`[${i}:a]volume=${SFX.volume},asplit=${at.length}${at.map((_, k) => `[${kind}${k}]`).join("")}`);
+        at.forEach((t, k) => graph.push(`[${kind}${k}]adelay=${t}:all=1[${kind}d${k}]`));
+        graph.push(`${at.map((_, k) => `[${kind}d${k}]`).join("")}amix=inputs=${at.length}:normalize=0:dropout_transition=0[${kind}]`);
+        mix.push(`[${kind}]`);
+    }
+    if (AUDIO.music) {
+        const i = input("-stream_loop", "-1", "-i", path.resolve(AUDIO.music));
+        const sec = end / 1000;
+        graph.push(`[${i}:a]aresample=48000,volume=${AUDIO.musicVolume ?? 0.18},atrim=0:${sec},afade=t=in:d=1,`
+            + `afade=t=out:st=${Math.max(0, sec - 1.5)}:d=1.5${cues.length && AUDIO.duck !== false ? "[bed]" : "[music]"}`);
+        // Duck: the voice keys a compressor on the music.
+        if (cues.length && AUDIO.duck !== false) {
+            graph.push("[vkey]apad[key]", "[bed][key]sidechaincompress=threshold=0.05:ratio=8:attack=50:release=400[music]");
+        }
+        mix.push("[music]");
+    }
+    if (cues.length && !(AUDIO.music && AUDIO.duck !== false)) {graph.push("[vkey]anullsink");}
+    graph.push(`${mix.join("")}amix=inputs=${mix.length}:normalize=0:dropout_transition=0,apad,aresample=48000[a]`);
+    const code = await new Promise((r) => spawn("ffmpeg", [
+        "-y", "-loglevel", "error", "-i", OUT, ...inputs,
+        "-filter_complex", graph.join(";"), "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", tmp,
+    ], { stdio: ["ignore", "inherit", "inherit"] }).on("close", r));
+    if (code !== 0) {throw new Error(`demo-reel: audio mux failed (ffmpeg exit ${code})`);}
+    renameSync(tmp, OUT);
+    console.log(`demo-reel: audio mixed in: ${cues.length} voice clips, ${sfx.length} sounds${AUDIO.music ? ", music" : ""}`);
+}
 console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${OW}x${OH} → ${OUT}`
     + ` (${BEGIN_FRAME ? "beginFrame" : "screenshot"}, ${msPerFrame} ms/frame)`);

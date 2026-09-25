@@ -5,3 +5,4 @@ node_modules/
 !docs/web2audio.mp4
 *-sheet.png
 .playwright-mcp/
+.demo-reel-cache/

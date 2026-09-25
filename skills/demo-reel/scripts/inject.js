@@ -76,7 +76,8 @@
         #__demo-overlay .halo { position: absolute; left: -${t.haloSize / 2}px; top: -${t.haloSize / 2}px;
           width: ${t.haloSize}px; height: ${t.haloSize}px; border-radius: 50%; box-sizing: border-box;
           ${(HALO[t.haloStyle] ?? HALO.fill)(t)} }
-        #__demo-overlay .ptr { position: absolute; filter: drop-shadow(0 2px 4px rgba(0,0,0,.4)); }
+        #__demo-overlay .ptr { position: absolute; overflow: visible; filter: drop-shadow(0 2px 4px rgba(0,0,0,.4)); }
+        #__demo-overlay .trail { opacity: 0; box-shadow: none; }
         #__demo-overlay .cur.down .ptr { scale: .86; }
         #__demo-overlay .cur.down .halo { scale: .82; }
         #__demo-overlay .ripple { position: absolute; width: 72px; height: 72px; margin: -36px 0 0 -36px; border-radius: 50%;
@@ -98,18 +99,36 @@
           animation-name: __demo-draw; animation-duration: .5s; }
         #__demo-overlay .hl-marker { border-radius: 4px; background: color-mix(in srgb, var(--c) 32%, transparent);
           transform-origin: left center; animation-name: __demo-draw; animation-duration: .5s; }
+        #__demo-overlay .hl-callout { width: 0; height: 0; animation-name: __demo-fade-in; }
+        #__demo-overlay .hl-callout i { position: absolute; background: var(--c); }
+        #__demo-overlay .hl-callout .dot { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; box-shadow: 0 0 0 2px #fff; }
+        #__demo-overlay .hl-callout .pill { position: absolute; white-space: nowrap; color: #fff; background: rgba(15,23,42,.86);
+          font: 600 ${Math.round(t.captionSize * 0.8)}px/1.2 ${t.font}; padding: 10px 18px; border-radius: 12px; box-shadow: 0 8px 30px rgba(0,0,0,.25); }
+        #__demo-overlay .side-right .lead, #__demo-overlay .side-left .lead { top: -.75px; width: 44px; height: 1.5px; }
+        #__demo-overlay .side-top .lead, #__demo-overlay .side-bottom .lead { left: -.75px; width: 1.5px; height: 44px; }
+        #__demo-overlay .side-right .lead { left: 0; }   #__demo-overlay .side-right .pill { left: 44px; translate: 0 -50%; }
+        #__demo-overlay .side-left .lead { right: 0; }   #__demo-overlay .side-left .pill { right: 44px; translate: 0 -50%; }
+        #__demo-overlay .side-bottom .lead { top: 0; }   #__demo-overlay .side-bottom .pill { top: 44px; translate: -50% 0; }
+        #__demo-overlay .side-top .lead { bottom: 0; }   #__demo-overlay .side-top .pill { bottom: 44px; translate: -50% 0; }
         #__demo-overlay .hl.out { animation: __demo-fade-out .3s ease forwards; }
         @keyframes __demo-hl-in { from { opacity: 0; transform: scale(1.08) } to { opacity: 1; transform: none } }
         @keyframes __demo-fade-in { from { opacity: 0 } to { opacity: 1 } }
         @keyframes __demo-fade-out { from { opacity: 1 } to { opacity: 0 } }
         @keyframes __demo-draw { from { transform: scaleX(0) } to { transform: none } }
         #__demo-overlay .hud { position: absolute; left: 0; top: 0; width: 100vw; height: 100vh; transform-origin: 0 0; }
+        #__demo-overlay .card { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center;
+          gap: 20px; padding: 0 12vw; font-family: ${t.font}; color: #fff; opacity: 0; transition: opacity .35s ease; }
+        #__demo-overlay .card.on { opacity: 1; }
+        #__demo-overlay .card h1 { margin: 0; font: 700 72px/1.1 ${t.font}; }
+        #__demo-overlay .card p { margin: 0; font: 500 34px/1.3 ${t.font}; opacity: .72; }
         #__demo-overlay .cap { position: absolute; left: 50%; ${t.captionPosition === "top" ? "top: 88px" : "bottom: 96px"};
           transform: translateX(-50%); max-width: 80vw; white-space: nowrap;
           font: 600 ${t.captionSize}px/1.2 ${t.font}; color: #fff; background: rgba(15,23,42,.86);
           padding: 14px 26px; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
           opacity: 0; transition: opacity .35s ease; }
         #__demo-overlay .cap.on { opacity: 1; }
+        #__demo-overlay .cap .word { color: rgba(255,255,255,.4); transition: color .12s; }
+        #__demo-overlay .cap .word.on { color: #fff; }
         ${t.caret === false ? "" : `input, textarea, [contenteditable] { caret-color: transparent !important; }`}
         #__demo-overlay .caret { position: absolute; width: 1px; display: none; }
         #__demo-overlay .mirror { position: absolute; left: -99999px; top: 0; visibility: hidden; border-style: solid; overflow-wrap: break-word; }
@@ -117,12 +136,12 @@
           font: 700 20px/1 ${t.font}; letter-spacing: .06em; color: #fff; padding: 10px 16px; border-radius: 10px; }
       </style>
       <div class="hls"></div><div class="caret"></div><div class="mirror"></div>
-      <div class="cur"><div class="halo"></div><svg class="ptr" viewBox="0 0 24 24" width="${t.cursorSize}" height="${t.cursorSize}"></svg></div>
-      <div class="hud"><div class="cap"></div><div class="badge"></div></div>`;
+      <div class="cur"><div class="halo trail"></div><div class="halo"></div><svg class="ptr" viewBox="0 0 24 24" width="${t.cursorSize}" height="${t.cursorSize}"></svg></div>
+      <div class="hud"><div class="card"><h1></h1><p></p></div><div class="cap"></div><div class="badge"></div></div>`;
     (document.body || document.documentElement).appendChild(root);
     const $ = (sel) => root.querySelector(sel);
-    ui = { root, cur: $(".cur"), halo: $(".halo"), ptr: $(".ptr"), hls: $(".hls"), hud: $(".hud"),
-      cap: $(".cap"), badge: $(".badge"), caret: $(".caret"), mirror: $(".mirror"), shape: null, hl: new Map() };
+    ui = { root, cur: $(".cur"), halo: $(".halo:not(.trail)"), trail: $(".trail"), ptr: $(".ptr"), hls: $(".hls"), hud: $(".hud"),
+      card: $(".card"), cap: $(".cap"), badge: $(".badge"), caret: $(".caret"), mirror: $(".mirror"), shape: null, hl: new Map() };
     return ui;
   }
 
@@ -195,8 +214,41 @@
     if (h.style === "circle") { x -= h.w * 0.1; w += h.w * 0.2; y -= h.h * 0.18; ht += h.h * 0.36; }
     if (h.style === "underline") { x = h.x; w = h.w; y = h.y + h.h + p / 2; ht = 4; }
     if (h.style === "marker") { x = h.x - 4; w = h.w + 8; y = h.y; ht = h.h; }
+    if (h.style === "callout") {
+      // Anchored at the middle of the target's edge on `side`: dot, leader line, then the pill.
+      const g = 6;
+      x = { left: h.x - g, right: h.x + h.w + g }[h.side] ?? h.x + h.w / 2;
+      y = { top: h.y - g, bottom: h.y + h.h + g }[h.side] ?? h.y + h.h / 2;
+      w = ht = 0;
+      el.classList.add(`side-${h.side}`);
+      el.innerHTML = '<i class="dot"></i><i class="lead"></i><span class="pill"></span>';
+      el.querySelector(".pill").textContent = h.text;
+    }
     Object.assign(el.style, { left: x + "px", top: y + "px", width: w + "px", height: ht + "px" });
     return el;
+  }
+
+  /** Blur ∝ distance covered since the last frame (cap 3 px); the halo leaves a
+   *  faint trail behind it. A still cursor renders exactly as without blur. */
+  function motionBlur(u, s) {
+    const mx = s.x - (u.px ?? s.x), my = s.y - (u.py ?? s.y);
+    u.px = s.x; u.py = s.y;
+    const speed = s.theme.cursorMotion?.blur ? Math.hypot(mx, my) : 0;
+    const sd = Math.min(speed / 10, 3);
+    if (sd < 0.05) {
+      u.blur.removeAttribute("filter"); u.rot.removeAttribute("transform"); u.unrot.removeAttribute("transform");
+      u.trail.style.opacity = 0;
+      return;
+    }
+    const [hx, hy] = u.hot, deg = (Math.atan2(my, mx) * 180) / Math.PI;
+    u.rot.setAttribute("transform", `rotate(${deg} ${hx} ${hy})`);
+    u.unrot.setAttribute("transform", `rotate(${-deg} ${hx} ${hy})`);
+    u.gauss.setAttribute("stdDeviation", `${(sd * 24) / s.theme.cursorSize} 0`);
+    u.blur.setAttribute("filter", "url(#__demo-mb)");
+    u.trail.style.opacity = Math.min(speed / 40, 1) * 0.35;
+    // Trails 1.5 frames behind, but never further than half the halo: a smear, not a second disc.
+    const lag = Math.min(1.5, (s.theme.haloSize * 0.45) / speed);
+    u.trail.style.translate = `${-mx * lag}px ${-my * lag}px`;
   }
 
   function sync(s) {
@@ -206,7 +258,7 @@
     // The recorder zooms the whole view; keep caption + badge at their normal screen size.
     u.hud.style.transform = c.z > 1 ? `translate(${c.x}px, ${c.y}px) scale(${1 / c.z})` : "";
     u.cur.style.display = s.cursor ? "block" : "none";
-    u.halo.style.display = s.theme.halo ? "block" : "none";
+    u.halo.style.display = u.trail.style.display = s.theme.halo ? "block" : "none";
     u.cur.style.transform = `translate(${s.x}px, ${s.y}px)`;
     u.cur.classList.toggle("down", s.pressed);
     const shape = cursorShape(s);
@@ -214,11 +266,39 @@
       u.shape = shape;
       const [svg, hx, hy] = CURSORS[shape];
       const k = s.theme.cursorSize / 24;
-      u.ptr.innerHTML = svg;
+      // Blur group: rotated onto the direction of travel, blurred along its x only,
+      // and the pointer counter-rotated inside it — a directional motion blur.
+      u.ptr.innerHTML = `<defs><filter id="__demo-mb" x="-50%" y="-50%" width="200%" height="200%">`
+        + `<feGaussianBlur stdDeviation="0 0"/></filter></defs><g><g><g>${svg}</g></g></g>`;
+      const [rot, blur, unrot] = u.ptr.querySelectorAll("g");
+      Object.assign(u, { rot, blur, unrot, gauss: u.ptr.querySelector("feGaussianBlur"), hot: [hx, hy] });
       Object.assign(u.ptr.style, { left: -hx * k + "px", top: -hy * k + "px", transformOrigin: `${hx * k}px ${hy * k}px` });
     }
-    if (s.caption) { if (u.cap.textContent !== s.caption) u.cap.textContent = s.caption; u.cap.classList.add("on"); }
+    motionBlur(u, s);
+    if (s.caption) {
+      if (u.cap.textContent !== s.caption) {
+        // Karaoke: one span per word, lit as the recorder's word times pass (capLit).
+        if (s.theme.captionStyle === "karaoke") {
+          u.cap.replaceChildren(...s.caption.split(/(\s+)/).map((p) => /\S/.test(p)
+            ? Object.assign(document.createElement("span"), { className: "word", textContent: p }) : p));
+        } else u.cap.textContent = s.caption;
+      }
+      u.cap.querySelectorAll(".word").forEach((w, i) => w.classList.toggle("on", s.capLit < 0 || i < s.capLit));
+      u.cap.classList.add("on");
+    }
     else u.cap.classList.remove("on");
+    if (s.card) {
+      const c = s.card, key = JSON.stringify(c);
+      if (u.cardKey !== key) {
+        u.cardKey = key;
+        u.card.querySelector("h1").textContent = c.title || "";
+        u.card.querySelector("p").textContent = c.subtitle || "";
+        u.card.style.background = c.bg;
+        u.card.style.alignItems = c.align === "left" ? "flex-start" : "center";
+        u.card.style.textAlign = c.align === "left" ? "left" : "center";
+      }
+      u.card.classList.add("on");
+    } else u.card.classList.remove("on");
     if (s.badge) { u.badge.style.display = "block"; u.badge.textContent = s.badge.text; u.badge.style.background = s.badge.color; }
     else u.badge.style.display = "none";
 
