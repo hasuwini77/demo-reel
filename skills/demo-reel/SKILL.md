@@ -95,6 +95,9 @@ export default {
 | `padding` | px inset on every side; the recorded page becomes `size - 2*padding`. |
 | `radius` | Window corner radius, px. |
 | `shadow` | `true` (soft default), `false`, or a CSS `box-shadow` string. |
+| `titlebar` | `"none"` (default) or `"mac"`: a light 32 px title bar with traffic-light dots on top of the window; the page loses those 32 px of height. |
+
+Captions, the badge, cards and the cursor are drawn in the page, so they stay inside the window, never on the background.
 
 **Zoom** re-renders the visible area at the zoom level (Chromium device-metrics emulation), so text stays sharp; the page never sees a resize and clicks still land where you aim. Camera moves ride a critically damped spring stepped once per frame — they always ease in and out. Captions and the badge keep their screen size; cursor and highlights zoom with the page.
 
