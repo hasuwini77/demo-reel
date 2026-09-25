@@ -352,9 +352,31 @@ const d = {
         for (let t = 0; t < ms; t += 50) { await tick(50, false); await page.waitForTimeout(20); }
     },
     /** Navigate, then settle before the next recorded frame. */
-    async open(url, { settle = 2500 } = {}) {
+    async open(url, { settle = 2500, prewarm = true } = {}) {
         await page.goto(url);
         await d.settle(settle);
+        // No pop-in once recording starts: fonts loaded, every image fetched and
+        // decoded, and (prewarm) lazy content below the fold triggered by a quick
+        // unrecorded scroll to the bottom and back. "instant", not "auto": auto
+        // obeys a page's `scroll-behavior: smooth`.
+        await page.evaluate(async (prewarm) => {
+            const images = () => {
+                const imgs = [...document.images];
+                for (const i of imgs) {i.loading = "eager";}
+                const decoded = Promise.allSettled(imgs.map((i) => i.decode()));
+                return Promise.race([decoded, new Promise((r) => setTimeout(r, 5000))]);
+            };
+            await document.fonts.ready;
+            await images();
+            if (!prewarm) {return;}
+            const { scrollX: x, scrollY: y } = window;
+            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+            await new Promise((r) => setTimeout(r, 300));
+            await images();
+            window.scrollTo({ left: x, top: y, behavior: "instant" });
+            await document.fonts.ready;
+        }, prewarm).catch((e) => console.warn(`demo-reel: prewarm skipped: ${String(e.message).split("\n")[0]}`));
+        await d.settle(250);
         await page.mouse.move(state.x, state.y);
     },
     /** Glide the cursor to a target (selector, Locator, {x,y} or async (page) => {x,y}). */
