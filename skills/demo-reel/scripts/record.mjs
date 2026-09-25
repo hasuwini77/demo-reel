@@ -126,6 +126,11 @@ const theme = {
     } : {}),
     ...userTheme,
 };
+// Cursor physics, each switchable; `cursorMotion: false` turns all three off.
+theme.cursorMotion = {
+    spring: true, arc: true, blur: true,
+    ...(userTheme.cursorMotion === false ? { spring: false, arc: false, blur: false } : userTheme.cursorMotion),
+};
 
 // ---------------------------------------------------------------- browser + encoder
 const browser = await chromium.launch({
@@ -186,9 +191,9 @@ const subs = [];          // captions: { text, start, end } in ms, frame-exact
 const cam = { x: W / 2, y: H / 2, lz: 0, vx: 0, vy: 0, vz: 0, tx: W / 2, ty: H / 2, tlz: 0, w: 4.7, follow: false, cx: 0, cy: 0 };
 let emulated = false;
 
-function spring(pos, vel, target, s) {
-    const d = pos - target, e = Math.exp(-cam.w * s), k = (vel + cam.w * d) * s;
-    return [target + (d + k) * e, (vel - cam.w * k) * e];
+function spring(pos, vel, target, s, w = cam.w) {
+    const d = pos - target, e = Math.exp(-w * s), k = (vel + w * d) * s;
+    return [target + (d + k) * e, (vel - w * k) * e];
 }
 
 function stepCamera(dt) {
@@ -307,6 +312,21 @@ async function tick(dt, capture) {
 
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
+// ---------------------------------------------------------------- cursor path
+// A move lasts longer the further it goes, rides the camera's spring (quick off
+// the mark, long soft landing) and bows slightly, like a hand on a mouse.
+const moveMs = (dist) => Math.min(Math.max(260 + dist * 0.55, 320), 1100);
+
+/** Progress 0→1 on each of n frames. The spring only approaches its target, so
+ * it is stepped to ~99 % and rescaled to land exactly on the last frame. */
+function springProgress(n) {
+    const w = 7 / ((n * DT) / 1000);
+    const ks = [];
+    let p = 0, v = 0;
+    for (let i = 0; i < n; i++) { [p, v] = spring(p, v, 1, DT / 1000, w); ks.push(p); }
+    return ks.map((k) => k / p);
+}
+
 /** Box of a target, in viewport px. A point ({x, y}) is a zero-size box. */
 async function rect(target) {
     if (target == null) {return { x: state.x, y: state.y, width: 0, height: 0 };}
@@ -338,29 +358,55 @@ const d = {
         for (let t = 0; t < ms; t += 50) { await tick(50, false); await page.waitForTimeout(20); }
     },
     /** Navigate, then settle before the next recorded frame. */
-    async open(url, { settle = 2500 } = {}) {
+    async open(url, { settle = 2500, prewarm = true } = {}) {
         await page.goto(url);
         await d.settle(settle);
+        // No pop-in once recording starts: fonts loaded, every image fetched and
+        // decoded, and (prewarm) lazy content below the fold triggered by a quick
+        // unrecorded scroll to the bottom and back. "instant", not "auto": auto
+        // obeys a page's `scroll-behavior: smooth`.
+        await page.evaluate(async (prewarm) => {
+            const images = () => {
+                const imgs = [...document.images];
+                for (const i of imgs) {i.loading = "eager";}
+                const decoded = Promise.allSettled(imgs.map((i) => i.decode()));
+                return Promise.race([decoded, new Promise((r) => setTimeout(r, 5000))]);
+            };
+            await document.fonts.ready;
+            await images();
+            if (!prewarm) {return;}
+            const { scrollX: x, scrollY: y } = window;
+            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
+            await new Promise((r) => setTimeout(r, 300));
+            await images();
+            window.scrollTo({ left: x, top: y, behavior: "instant" });
+            await document.fonts.ready;
+        }, prewarm).catch((e) => console.warn(`demo-reel: prewarm skipped: ${String(e.message).split("\n")[0]}`));
+        await d.settle(250);
         await page.mouse.move(state.x, state.y);
     },
     /** Glide the cursor to a target (selector, Locator, {x,y} or async (page) => {x,y}). */
-    async move(target, { ms = 650 } = {}) {
+    async move(target, { ms } = {}) {
         const p = await point(target);
-        const n = Math.max(6, Math.round(ms / DT));
-        const x0 = state.x, y0 = state.y;
+        const x0 = state.x, y0 = state.y, dx = p.x - x0, dy = p.y - y0, dist = Math.hypot(dx, dy);
+        const n = Math.max(6, Math.round((ms ?? moveMs(dist)) / DT));
+        const motion = theme.cursorMotion;
+        const ks = motion.spring ? springProgress(n) : Array.from({ length: n }, (_, i) => ease((i + 1) / n));
+        // Arc: bulge along the perpendicular on the upper side, peaking mid-move.
+        const bow = motion.arc && dist ? (Math.min(dist * 0.06, 40) / dist) * (dx < 0 ? -1 : 1) : 0;
         auto.click = null;
-        if (Math.hypot(p.x - x0, p.y - y0) > Math.hypot(W, H) * 0.3) {autoOut();}
-        for (let i = 1; i <= n; i++) {
-            const k = ease(i / n);
-            state.x = x0 + (p.x - x0) * k;
-            state.y = y0 + (p.y - y0) * k;
+        if (dist > Math.hypot(W, H) * 0.3) {autoOut();}
+        for (const k of ks) {
+            const b = Math.sin(Math.PI * k) * bow;
+            state.x = x0 + dx * k + dy * b;
+            state.y = y0 + dy * k - dx * b;
             await page.mouse.move(state.x, state.y);
             await tick(DT, true);
         }
     },
     async hover(target, opts) { await d.move(target, opts); },
     /** Move, then click with a ripple. `button: "right"` for context menus. */
-    async click(target, { ms = 650, button = "left", pause = 80 } = {}) {
+    async click(target, { ms, button = "left", pause = 80 } = {}) {
         await d.move(target, { ms });
         await d.hold(pause);
         state.clickSeq++;

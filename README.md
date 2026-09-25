@@ -118,10 +118,10 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 
 | Call | Does |
 |---|---|
-| `d.open(url, { settle })` | Navigate, let the page settle (unrecorded, default 2500 ms). |
+| `d.open(url, { settle, prewarm })` | Navigate, let the page settle (unrecorded, default 2500 ms), wait for fonts, load + decode every image; `prewarm` (default on) scrolls to the bottom and back unrecorded so lazy content is in before the first recorded scroll. |
 | `d.hold(ms)` | Record the page as it is. |
 | `d.settle(ms)` | Advance time without recording — skip loading states, lazy chunks. |
-| `d.move(target, { ms })` / `d.hover` | Glide the cursor (eased) to a target. |
+| `d.move(target, { ms })` / `d.hover` | Glide the cursor to a target. Without `ms` the duration follows the distance (320–1100 ms); spring-eased, slightly arced, motion-blurred. |
 | `d.click(target, { ms, button })` | Move, click with a ripple. |
 | `d.doubleClick(target)` | Double click. |
 | `d.type(text, { delay })` | Type one key at a time (default 90 ms/key). |
