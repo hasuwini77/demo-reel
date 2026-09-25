@@ -27,6 +27,8 @@
           transform: translateX(100%); transition: transform .35s cubic-bezier(.2,.7,.3,1); }
   aside.open { transform: none; }
   aside h2 { margin: 0 0 8px; } aside p { color: var(--muted); }
+  .toast { position: fixed; left: 24px; bottom: 24px; display: none; padding: 12px 18px; border-radius: 10px; background: var(--text); color: #fff; font-weight: 600; }
+  .toast.on { display: block; }
 </style>
 </head>
 <body>
@@ -41,6 +43,7 @@
   <ul></ul>
   <aside><h2></h2><p>Created just now. Click another task to switch, or press Esc.</p></aside>
 </main>
+<div class="toast" role="status">Task added</div>
 <script>
   const tasks = [{ t: "Draft the quarterly report", done: false }, { t: "Review pull requests", done: true }, { t: "Book the team offsite", done: false }];
   let filter = "all";
@@ -60,8 +63,16 @@
   document.querySelector("form").addEventListener("submit", (e) => {
     e.preventDefault();
     const i = e.target.querySelector("input");
-    if (i.value.trim()) { tasks.unshift({ t: i.value.trim(), done: false }); i.value = ""; render(); }
+    if (i.value.trim()) { tasks.unshift({ t: i.value.trim(), done: false }); i.value = ""; render(); showToast(); }
   });
+  // A 3 s toast: the hybrid clock (clock: "hybrid") keeps it on screen for 3 s of video.
+  const toast = document.querySelector(".toast");
+  let toastTimer;
+  function showToast() {
+    toast.classList.add("on");
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove("on"), 3000);
+  }
   document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
     filter = b.dataset.filter;
     document.querySelectorAll("nav button").forEach((x) => x.setAttribute("aria-pressed", x === b));
