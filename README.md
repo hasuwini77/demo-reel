@@ -109,6 +109,7 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 - 🖍️ **Highlighters** — box, circle, spotlight, underline, marker
 - 💬 **Captions and badges** that survive page navigations (`BEFORE` / `AFTER`, `NEW`…), plus frame-exact `.srt` / `.vtt` subtitles
 - 🗣️ **Voice-over** — `d.say(text)`, or `voice.captions: true` to speak every caption; local Kokoro or Piper, ElevenLabs, OpenAI or any command; cached, so re-takes are free
+- 🎵 **Music and sounds** — `audio: { music, duck: true, sfx: true }`: a looped music bed ducked under the voice, click and key sounds on their frames, and karaoke captions (`captionStyle: "karaoke"`)
 - 🎞️ **Exact timing** — a 1.5 s hold is 90 frames, always; loading screens are skipped, not recorded
 - 🧊 **WebGL / three.js / canvas** apps work (software rendering, still frame-exact)
 - 📦 **H.264 MP4, yuv420p** — plays and loops in PowerPoint and Keynote without conversion
