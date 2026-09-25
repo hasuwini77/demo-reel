@@ -473,6 +473,38 @@
     }
   }
 
+  // ---- 4. change log ----------------------------------------------------------
+  // Which elements changed, and when (virtual time), so the recorder's smart
+  // click-zoom can tell whether a click's result shows up near it. Boxes are
+  // measured when asked, so a panel mid-slide counts where it has got to.
+  const changed = new Map();   // element → vt of its last change
+  new MutationObserver((records) => {
+    for (const r of records) {
+      for (let n of r.type === "childList" ? [r.target, ...r.addedNodes] : [r.target]) {
+        if (n.nodeType !== 1) n = n.parentElement;
+        if (n && !n.closest("#__demo-overlay")) changed.set(n, vt);
+      }
+    }
+    if (changed.size > 5000) for (const [el, t] of changed) if (t < vt - 2000 || !el.isConnected) changed.delete(el);
+  }).observe(document, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style", "hidden", "open", "aria-expanded"] });
+
+  /** Union box (viewport px) of visible elements changed at vt ∈ [since, until],
+   *  clipped to the viewport; ignores anything over 60 % of it. null if none. */
+  function changesSince(since, until = Infinity) {
+    const vw = innerWidth, vh = innerHeight;
+    let b = null;
+    for (const [el, t] of changed) {
+      if (t < since - 5000) { changed.delete(el); continue; }
+      if (t < since || t > until || !el.isConnected) continue;
+      if (el.checkVisibility?.({ opacityProperty: true, visibilityProperty: true }) === false) continue;
+      const r = el.getBoundingClientRect();
+      const x0 = Math.max(r.left, 0), y0 = Math.max(r.top, 0), x1 = Math.min(r.right, vw), y1 = Math.min(r.bottom, vh);
+      if (x1 <= x0 || y1 <= y0 || (x1 - x0) * (y1 - y0) > 0.6 * vw * vh) continue;
+      b = b ? [Math.min(b[0], x0), Math.min(b[1], y0), Math.max(b[2], x1), Math.max(b[3], y1)] : [x0, y0, x1, y1];
+    }
+    return b && { x: b[0], y: b[1], width: b[2] - b[0], height: b[3] - b[1] };
+  }
+
   window.__demo = {
     /** Advance virtual time by dt ms, run due rAF callbacks, sync overlay + animations.
      *  Returns the scroll offset, which the recorder's zoom camera needs. */
@@ -492,6 +524,7 @@
       return [scrollX, scrollY];
     },
     now: () => vt,
+    changesSince,
     /** Real setTimeout, for the recorder's own waits inside the page. */
     realTimeout: realSetTimeout,
   };
