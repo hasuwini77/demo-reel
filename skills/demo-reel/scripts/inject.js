@@ -12,6 +12,18 @@
 (() => {
   if (window.__demo) return;
 
+  // ---- 0. seeded Math.random (theme.seed, prepended by the recorder) -------
+  if (typeof __demoSeed === "number") {
+    let a = __demoSeed >>> 0;
+    // mulberry32
+    Math.random = () => {
+      a = (a + 0x6D2B79F5) >>> 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
   // ---- 1. virtual clock ---------------------------------------------------
   const realPerf = performance.now.bind(performance);
   const perfBase = realPerf();
@@ -250,6 +262,11 @@
         #__demo-overlay .cap.on { opacity: 1; }
         #__demo-overlay .cap .word { color: rgba(255,255,255,.4); transition: color .12s; }
         #__demo-overlay .cap .word.on { color: #fff; }
+        #__demo-overlay .keys { position: absolute; left: 50%; transform: translateX(-50%); display: none; gap: 10px;
+          ${t.captionPosition === "top" ? "top" : "bottom"}: ${(t.captionPosition === "top" ? 88 : 96) + Math.round(t.captionSize * 1.2) + 28 + 18}px; }
+        #__demo-overlay .keys kbd { min-width: 30px; text-align: center; font: 600 ${t.captionSize}px/1.2 ${t.font}; color: #fff;
+          background: rgba(15,23,42,.86); padding: 12px 18px; border-radius: 12px;
+          box-shadow: inset 0 -3px 0 rgba(255,255,255,.14), 0 8px 30px rgba(0,0,0,.25); }
         ${t.caret === false ? "" : `input, textarea, [contenteditable] { caret-color: transparent !important; }`}
         #__demo-overlay .caret { position: absolute; width: 1px; display: none; }
         #__demo-overlay .mirror { position: absolute; left: -99999px; top: 0; visibility: hidden; border-style: solid; overflow-wrap: break-word; }
@@ -258,11 +275,11 @@
       </style>
       <div class="hls"></div><div class="caret"></div><div class="mirror"></div>
       <div class="cur"><div class="halo trail"></div><div class="halo"></div><svg class="ptr" viewBox="0 0 24 24" width="${t.cursorSize}" height="${t.cursorSize}"></svg></div>
-      <div class="hud"><div class="card"><h1></h1><p></p></div><div class="cap"></div><div class="badge"></div></div>`;
+      <div class="hud"><div class="card"><h1></h1><p></p></div><div class="keys"></div><div class="cap"></div><div class="badge"></div></div>`;
     (document.body || document.documentElement).appendChild(root);
     const $ = (sel) => root.querySelector(sel);
     ui = { root, cur: $(".cur"), halo: $(".halo:not(.trail)"), trail: $(".trail"), ptr: $(".ptr"), hls: $(".hls"), hud: $(".hud"),
-      card: $(".card"), cap: $(".cap"), badge: $(".badge"), caret: $(".caret"), mirror: $(".mirror"), shape: null, hl: new Map() };
+      card: $(".card"), cap: $(".cap"), keys: $(".keys"), badge: $(".badge"), caret: $(".caret"), mirror: $(".mirror"), shape: null, hl: new Map() };
     return ui;
   }
 
@@ -420,6 +437,11 @@
       }
       u.card.classList.add("on");
     } else u.card.classList.remove("on");
+    if (s.keycap) {
+      const html = s.keycap.caps.map((c) => `<kbd>${c.replace(/[&<>]/g, (x) => `&#${x.charCodeAt(0)};`)}</kbd>`).join("");
+      if (u.keys.dataset.k !== html) { u.keys.dataset.k = html; u.keys.innerHTML = html; }
+      u.keys.style.display = "flex"; u.keys.style.opacity = s.keycap.o;
+    } else u.keys.style.display = "none";
     if (s.badge) { u.badge.style.display = "block"; u.badge.textContent = s.badge.text; u.badge.style.background = s.badge.color; }
     else u.badge.style.display = "none";
 
