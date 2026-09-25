@@ -3,6 +3,7 @@
 //
 //   node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080]
 //                   [--crf 17] [--png] [--headed] [--capture screenshot|beginframe]
+//                   [--clock real|hybrid]
 //
 // Every frame is rendered at an exact 1/fps step of a virtual clock (see
 // inject.js), so the video is smooth no matter how slowly the page renders.
@@ -30,7 +31,7 @@ const flag = (name, def) => {
 };
 const scenarioPath = argv[0];
 if (!scenarioPath || scenarioPath.startsWith("--")) {
-    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed] [--capture screenshot|beginframe]");
+    console.error("usage: node record.mjs <scenario.mjs> [--out demo.mp4] [--fps 60] [--size 1920x1080] [--crf 17] [--png] [--headed] [--capture screenshot|beginframe] [--clock real|hybrid]");
     process.exit(1);
 }
 const mod = await import(pathToFileURL(path.resolve(scenarioPath)).href);
@@ -45,6 +46,13 @@ const DT = 1000 / FPS;
 const HEADED = Boolean(flag("headed", false));
 // Headed Chrome has no BeginFrameControl: it always uses Page.captureScreenshot.
 const BEGIN_FRAME = !HEADED && flag("capture", "screenshot") === "beginframe";
+// Hybrid clock: setTimeout/setInterval of 16 ms or more and smooth scrolls run on
+// the virtual clock too (see inject.js). Opt-in.
+const CLOCK = String(flag("clock", scenario.clock ?? "real"));
+if (!["real", "hybrid"].includes(CLOCK)) {
+    console.error(`demo-reel: --clock must be real or hybrid, got ${CLOCK}`);
+    process.exit(1);
+}
 // Software WebGL so three.js / canvas scenes render headless.
 const BASE_ARGS = ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--hide-scrollbars"];
 // Voice-over: provider is named by the scenario, checked before the take starts.
@@ -169,7 +177,7 @@ const context = await browser.newContext({
     locale: scenario.locale,
     colorScheme: scenario.colorScheme,
 });
-await context.addInitScript(readFileSync(path.join(HERE, "inject.js"), "utf8"));
+await context.addInitScript(`window.__demoClock = "${CLOCK}";\n` + readFileSync(path.join(HERE, "inject.js"), "utf8"));
 const page = await context.newPage();
 const cdp = await context.newCDPSession(page);
 
@@ -432,18 +440,20 @@ const d = {
         // unrecorded scroll to the bottom and back. "instant", not "auto": auto
         // obeys a page's `scroll-behavior: smooth`.
         await page.evaluate(async (prewarm) => {
+            // Real timers: under the hybrid clock, page timers wait for ticks.
+            const wait = (ms) => new Promise((r) => (window.__demo?.realTimeout ?? setTimeout)(r, ms));
             const images = () => {
                 const imgs = [...document.images];
                 for (const i of imgs) {i.loading = "eager";}
                 const decoded = Promise.allSettled(imgs.map((i) => i.decode()));
-                return Promise.race([decoded, new Promise((r) => setTimeout(r, 5000))]);
+                return Promise.race([decoded, wait(5000)]);
             };
             await document.fonts.ready;
             await images();
             if (!prewarm) {return;}
             const { scrollX: x, scrollY: y } = window;
             window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" });
-            await new Promise((r) => setTimeout(r, 300));
+            await wait(300);
             await images();
             window.scrollTo({ left: x, top: y, behavior: "instant" });
             await document.fonts.ready;
