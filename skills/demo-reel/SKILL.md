@@ -68,6 +68,7 @@ export default {
 | `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
 | `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
 | `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. `d.cursor("hand")` switches shape mid-take. |
+| `d.say(text, { wait })` | Voice-over from this frame (needs `voice`, see Voice-over). Returns `{ at, dur }` at once; `wait: true` holds until the clip ends. |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
 
@@ -99,6 +100,34 @@ const node = (label) => (page) => page.evaluate((label) => {
 }, label);
 await d.click(node("Server A"));
 ```
+
+## Voice-over
+
+Name a provider and the take gets an audio track; captions also become subtitles. Nothing is spoken unless the scenario names a provider — there is no key auto-detection, because cloud providers send the text off the machine.
+
+```js
+export default {
+  voice: { provider: "kokoro", voice: "af_heart", speed: 1, captions: true }, // captions: true speaks every d.caption
+  async run(d) {
+    await d.say("Filters live in one panel.");                 // starts at this frame, doesn't hold
+    await d.say("Results update as you type.", { wait: true }); // holds until the clip ends (+200 ms)
+  },
+};
+```
+
+| `provider` | Needs | Defaults |
+|---|---|---|
+| `kokoro` | `npm i kokoro-js` in the skill folder (~830 MB, CPU only; not installed by default). First use downloads the model (~80 MB). Local, free. | voice `af_heart`, `dtype: "q8"` |
+| `elevenlabs` | `ELEVENLABS_API_KEY` in the environment | model `eleven_flash_v2_5` (`eleven_multilingual_v2` for quality), `voice` = voice id |
+| `openai` | `OPENAI_API_KEY` in the environment | model `gpt-4o-mini-tts`, voice `alloy` |
+| `piper` | `piper` on PATH, `model: "path/to/voice.onnx"` | — |
+| `command` | `command: "my-tts --out {out} {text}"` (split on spaces, no shell) | writes a WAV to `{out}` |
+
+- Keys are read from the environment only — never pass them as CLI arguments; they are never logged.
+- Synthesis happens between frames, so it costs no video time. Clips are cached in `.demo-reel-cache/voice/` by provider, voice, model, speed and text: a re-take re-bills and re-synthesizes nothing (`voice: cache hit`).
+- Clips never overlap: one that would start within 150 ms of the previous clip's end is moved later, with a warning. Give long lines `wait: true` or a longer `d.hold`.
+- The clips are mixed under the untouched video (`-c:v copy`, AAC 160k, 48 kHz). No voice → the MP4 stays silent, as before.
+- **Subtitles**: every take with captions also writes `<out>.srt` and `<out>.vtt` next to the MP4 — a line starts on the frame the caption was set and ends when it is replaced or cleared.
 
 ## Writing good demos
 
