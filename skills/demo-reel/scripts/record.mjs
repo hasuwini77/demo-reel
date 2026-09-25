@@ -8,10 +8,11 @@
 // inject.js), so the video is smooth no matter how slowly the page renders.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, renameSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { pathToFileURL, fileURLToPath } from "node:url";
+import { createVoice } from "./voice.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -37,6 +38,8 @@ const OUT = path.resolve(flag("out", scenario.out ?? path.basename(scenarioPath)
 const CRF = String(flag("crf", 17));
 const PNG = Boolean(flag("png", false));
 const DT = 1000 / FPS;
+// Voice-over: provider is named by the scenario, checked before the take starts.
+const VOICE = scenario.voice ? await createVoice(scenario.voice) : null;
 
 // ---------------------------------------------------------------- styled frame
 // `frame` puts the page in a rounded window, inset on a background, with a soft
@@ -176,6 +179,9 @@ const state = {
 };
 let frames = 0;
 let hlSeq = 0;
+const cues = [];          // voice clips: { at (ms), file, dur (ms) }
+let sayQueue = Promise.resolve();
+const subs = [];          // captions: { text, start, end } in ms, frame-exact
 
 // ---------------------------------------------------------------- zoom camera
 // Center (viewport px) and zoom, each chasing its target on a critically damped
@@ -448,7 +454,39 @@ const d = {
         }
     },
     /** Caption pill (null hides it). Set it *after* the action it describes. */
-    caption(text) { state.caption = text || null; },
+    caption(text) {
+        state.caption = text || null;
+        const last = subs.at(-1);
+        if (last && last.end == null) {last.end = now();}
+        if (text) {subs.push({ text, start: now(), end: null });}
+        // voice.captions: speak every caption too (non-blocking, errors only warn).
+        if (text && VOICE && scenario.voice.captions) {
+            d.say(text).catch((e) => console.warn(String(e.message)));
+        }
+    },
+    /**
+     * Speak `text` from this frame on. Synthesis runs between frames, so it costs
+     * no video time; returns { at, dur } in ms. `wait: true` holds until the clip
+     * ends (+200 ms). A clip that would overlap the previous one is pushed later.
+     */
+    say(text, { wait = false } = {}) {
+        if (!VOICE) {throw new Error("demo-reel: d.say needs `voice: { provider }` in the scenario");}
+        const at0 = now();
+        const job = sayQueue.then(async () => {
+            const { file, dur } = await VOICE.synth(text);
+            const prev = cues.at(-1);
+            let at = at0;
+            if (prev && at < prev.at + prev.dur + 150) {
+                at = prev.at + prev.dur + 150;
+                console.warn(`voice: "${text.slice(0, 40)}" overlaps the previous clip, moved ${Math.round(at - at0)} ms later`);
+            }
+            cues.push({ at, file, dur });
+            return { at, dur };
+        });
+        sayQueue = job.catch(() => {});
+        if (!wait) {return job;}
+        return job.then(async (c) => { await d.hold(Math.max(0, c.at + c.dur + 200 - now())); return c; });
+    },
     /** Corner badge, e.g. d.badge("BEFORE", "#b91c1c"); null hides it. */
     badge(text, color = "#15803d") { state.badge = text ? { text, color } : null; },
     /** true/false shows/hides the cursor; a name switches its shape (arrow, mac, hand, ibeam, dot, auto). */
@@ -485,10 +523,41 @@ const d = {
 
 try {
     await scenario.run(d);
+    await sayQueue;
 } finally {
     ff.stdin.end();
     await ffDone;
     await browser.close();
     if (platePath) {try { unlinkSync(platePath); } catch { /* best effort */ }}
+}
+
+// ---------------------------------------------------------------- subtitles + audio
+// Subtitles from the caption cues; times are frame-exact by construction.
+const end = frames * DT;
+const lines = subs.map((c) => ({ ...c, end: Math.min(c.end ?? end, end) })).filter((c) => c.end > c.start);
+if (lines.length) {
+    const ts = (ms, sep) => {
+        const t = Math.round(ms), p = (n, w = 2) => String(n).padStart(w, "0");
+        return `${p(Math.floor(t / 3600000))}:${p(Math.floor(t / 60000) % 60)}:${p(Math.floor(t / 1000) % 60)}${sep}${p(t % 1000, 3)}`;
+    };
+    const base = OUT.replace(/\.[^.]+$/, "");
+    writeFileSync(`${base}.srt`, lines.map((c, i) => `${i + 1}\n${ts(c.start, ",")} --> ${ts(c.end, ",")}\n${c.text}\n`).join("\n"));
+    writeFileSync(`${base}.vtt`, `WEBVTT\n\n${lines.map((c) => `${ts(c.start, ".")} --> ${ts(c.end, ".")}\n${c.text}\n`).join("\n")}`);
+    console.log(`demo-reel: ${lines.length} subtitles → ${base}.srt / .vtt`);
+}
+
+// Voice clips, each delayed to its frame, mixed under the untouched video.
+if (cues.length) {
+    const tmp = OUT.replace(/(\.[^.]+)?$/, ".voice$1");
+    const graph = cues.map((c, i) => `[${i + 1}:a]adelay=${Math.round(c.at)}:all=1[a${i + 1}]`).join(";")
+        + `;${cues.map((_, i) => `[a${i + 1}]`).join("")}amix=inputs=${cues.length}:normalize=0:dropout_transition=0,apad,aresample=48000[a]`;
+    const code = await new Promise((r) => spawn("ffmpeg", [
+        "-y", "-loglevel", "error", "-i", OUT, ...cues.flatMap((c) => ["-i", c.file]),
+        "-filter_complex", graph, "-map", "0:v", "-map", "[a]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-shortest", "-movflags", "+faststart", tmp,
+    ], { stdio: ["ignore", "inherit", "inherit"] }).on("close", r));
+    if (code !== 0) {throw new Error(`demo-reel: audio mux failed (ffmpeg exit ${code})`);}
+    renameSync(tmp, OUT);
+    console.log(`demo-reel: ${cues.length} voice clips mixed in`);
 }
 console.log(`demo-reel: ${frames} frames = ${(frames / FPS).toFixed(1)} s @ ${FPS} fps, ${OW}x${OH} → ${OUT}`);
