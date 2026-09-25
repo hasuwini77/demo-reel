@@ -25,6 +25,7 @@ The compositor still runs on real time: image decode, tile raster, GIFs and `scr
 1. **Serve the app** the way users see it — ideally a production build (`vite build && vite preview`, `next build && next start`) against local or mock data. Dev servers work but are slower and may show dev overlays. **Never record real or sensitive data** — seed demo data.
 2. **Write a scenario** (`*.scenario.mjs`, see API below). Start from `examples/tasks.scenario.mjs`. Plan it as a story: 20–60 s, one idea per caption, 1–2 s holds after each result so viewers can read it.
 3. **Record**: `node scripts/record.mjs my.scenario.mjs --out demo.mp4`
+   Iterate with `--preview` (24 fps, lighter JPEG + x264, same viewport so layout is unchanged), then record the full take.
    A 60 s clip at 1080p takes roughly 3–10 min (heavy WebGL pages are slowest). Run it in the background.
 4. **QA**: `scripts/sheet.sh demo.mp4` writes a contact sheet (one frame every 2.5 s). Look at it: captions match what is on screen, no loading spinners, nothing covered by the caption, badge/cursor visible. It also prints a smoothness report, e.g. `jank: 0 suspicious frames, 0 hard cuts`: a *suspicious* frame is a frozen one (nothing changed while the two frames on each side move, a duplicated frame), a *hard cut* is a scene change above 0.35. *Pops* (one frame changes > 3× both neighbours) are listed but not counted: typing and discrete UI updates look the same as a real-time timer popping, so check them by eye. A single dropped frame is only ~2× its neighbours and isn't detected, and a pan at ~1 px/frame (the tail of a zoom) can round to the same pixel for a frame and show up as frozen.
 5. **Deliver** (see "Using the video").
@@ -67,18 +68,21 @@ export default {
 | `d.click(target, { ms, button })` | Move, click with a ripple. `button: "right"` for context menus. |
 | `d.doubleClick(target)` | Double click. |
 | `d.type(text, { delay })` | Type one key at a time (default 90 ms/key). |
-| `d.press(key)` | Keyboard shortcut, e.g. `"Escape"`, `"Control+K"`. |
+| `d.press(key)` | Keyboard shortcut, e.g. `"Escape"`, `"Control+K"`. Shown as keycaps above the caption for 900 ms (`theme.keycaps`). |
 | `d.scroll(dy, { ms })` | Smooth wheel scroll. |
 | `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
 | `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
 | `d.callout(target, text, { side, color, ms })` | Label a target: a caption-style pill beside it, a leader line and a dot on its edge. `side` `auto` (the side with the most room) · `top` · `right` · `bottom` · `left`. Zooms with the page. Clears after `ms`, or with `d.callout(null)`. |
 | `d.card({ title, subtitle, ms, bg, align })` | Full-frame title or end card over the page (not zoomed): 350 ms fade in, `ms` shown (2500), 350 ms fade out, cursor hidden. `bg` any CSS background (`#0f172a`), `align` `center` · `left`. |
 | `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. `d.cursor("hand")` switches shape mid-take. |
+| `d.speed(k)` | Fast-forward: each recorded frame advances the page by k/fps, and `hold`/`type` delays count in page time (a `hold(8000)` at 4× is 2 s of video). Cursor moves, scrolls and the camera keep their on-screen speed. `d.speed(1)` resets. |
+| `d.poster()` | Mark the next recorded frame as the poster: written as `<out>.poster.jpg`. |
+| `d.chapter(title)` | Start an MP4 chapter here (listed by QuickTime, YouTube, `ffprobe -show_chapters`). |
 | `d.say(text, { wait })` | Voice-over from this frame (needs `voice`, see Voice-over). Returns `{ at, dur }` at once; `wait: true` holds until the clip ends. |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
 
-**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `cursorMotion` (`{ spring, arc, blur }`, all on; `false` turns all off — cubic ease, straight line, no blur), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`.
+**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `cursorMotion` (`{ spring, arc, blur }`, all on; `false` turns all off — cubic ease, straight line, no blur), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`, `keycaps` (`mac` default: `Control`/`Meta` → ⌘, ⌥ ⇧ ↩; `win`: Ctrl, Alt, Shift; `false` hides them), `seed` (a number: `Math.random` becomes a seeded PRNG, so apps with random demo data give identical takes).
 
 **Frame**: `frame: true` sits the page in a rounded window with a soft shadow, inset on a wallpaper/gradient — omit it and output is unchanged. It costs nothing per frame (one plate image, composited by ffmpeg), and pairs well with zoom — the window stays put while the camera moves inside it.
 

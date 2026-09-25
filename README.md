@@ -111,7 +111,8 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 - 💬 **Captions and badges** that survive page navigations (`BEFORE` / `AFTER`, `NEW`…), plus frame-exact `.srt` / `.vtt` subtitles
 - 🗣️ **Voice-over** — `d.say(text)`, or `voice.captions: true` to speak every caption; local Kokoro or Piper, ElevenLabs, OpenAI or any command; cached, so re-takes are free
 - 🎵 **Music and sounds** — `audio: { music, duck: true, sfx: true }`: a looped music bed ducked under the voice, click and key sounds on their frames, and karaoke captions (`captionStyle: "karaoke"`)
-- 🎞️ **Exact timing** — a 1.5 s hold is 90 frames, always; loading screens are skipped, not recorded
+- 🎞️ **Exact timing** — a 1.5 s hold is 90 frames, always; loading screens are skipped, not recorded; `d.speed(4)` fast-forwards long typing; `theme.seed` pins `Math.random` so takes repeat
+- 🔖 **Chapters, poster, preview** — `d.chapter("Filters")` muxes MP4 chapters, `d.poster()` writes a poster JPEG, `--preview` renders a quick 24 fps draft
 - 🧊 **WebGL / three.js / canvas** apps work (software rendering, still frame-exact)
 - 📦 **H.264 MP4, yuv420p** — plays and loops in PowerPoint and Keynote without conversion; `--loop` crossfades the end into the start so the loop has no jump
 - 🧪 **A QA contact sheet** to check a take at a glance, plus a jank report (frozen frames, hard cuts)
@@ -127,13 +128,15 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 | `d.click(target, { ms, button })` | Move, click with a ripple. |
 | `d.doubleClick(target)` | Double click. |
 | `d.type(text, { delay })` | Type one key at a time (default 90 ms/key). |
-| `d.press(key)` | Keyboard shortcut, e.g. `"Control+K"`. |
+| `d.press(key)` | Keyboard shortcut, e.g. `"Control+K"`, shown as `⌘ K` keycaps (`theme.keycaps: "mac" \| "win" \| false`). |
 | `d.scroll(dy, { ms })` | Smooth wheel scroll. |
 | `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
 | `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
 | `d.callout(target, text, { side, color, ms })` | Label a target: a caption-style pill beside it, a leader line and a dot on its edge. `side` `auto` (the side with the most room) · `top` · `right` · `bottom` · `left`. Zooms with the page. Clears after `ms`, or with `d.callout(null)`. |
 | `d.card({ title, subtitle, ms, bg, align })` | Full-frame title or end card over the page (not zoomed): 350 ms fade in, `ms` shown (2500), 350 ms fade out, cursor hidden. `bg` any CSS background (`#0f172a`), `align` `center` · `left`. |
 | `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. |
+| `d.speed(k)` | Fast-forward long typing or loading: page time runs k× per recorded frame; `d.speed(1)` resets. |
+| `d.poster()` / `d.chapter(title)` | Mark the poster frame (`<out>.poster.jpg`) / start an MP4 chapter. |
 | `d.say(text, { wait })` | Voice-over from this frame (`voice: { provider }` in the scenario). |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
@@ -173,7 +176,7 @@ demo-reel is an [Agent Skill](https://agentskills.io): any agent that reads `SKI
 ## Roadmap
 
 - [x] Zoom / pan-to-focus on a region
-- [ ] Keyboard-shortcut overlay (show `⌘K` when pressed)
+- [x] Keyboard-shortcut overlay (show `⌘K` when pressed)
 - [x] Title and end cards
 - [x] Audio track / voice-over from captions
 - [ ] Auto-trim idle stretches
