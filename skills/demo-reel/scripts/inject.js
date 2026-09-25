@@ -456,14 +456,17 @@
      *  Returns the scroll offset, which the recorder's zoom camera needs. */
     tick(dt, state) {
       ticking = true;
-      runTimers(vt + dt);
-      stepScrolls();
-      const now = perfBase + vt;
-      const run = queue; queue = [];
-      for (const e of run) { try { e.cb(now); } catch (err) { console.error(err); } }
-      if (state) sync(state);
-      stepAnimations();
-      ticking = false;
+      try {
+        runTimers(vt + dt);
+        stepScrolls();
+        const now = perfBase + vt;
+        const run = queue; queue = [];
+        for (const e of run) { try { e.cb(now); } catch (err) { console.error(err); } }
+        if (state) sync(state);
+        stepAnimations();
+      } finally {
+        ticking = false;
+      }
       return [scrollX, scrollY];
     },
     now: () => vt,
