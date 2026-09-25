@@ -84,26 +84,34 @@ const FRAME = frameCfg ? {
     padding: Math.round(frameCfg.padding ?? OW * 0.04),
     radius: frameCfg.radius ?? 14,
     shadow: frameCfg.shadow ?? true,
+    titlebar: frameCfg.titlebar ?? "none",
 } : null;
+if (FRAME && !["mac", "none"].includes(FRAME.titlebar)) {
+    throw new Error(`demo-reel: frame.titlebar must be "mac" or "none", got ${JSON.stringify(FRAME.titlebar)}`);
+}
+// Title bar height (px) drawn on the plate above the page; the viewport loses it.
+const TB = FRAME?.titlebar === "mac" ? 32 : 0;
 
 // W/H stay the *viewport* size (what the page/camera/cursor see); OW/OH is the
 // final video size. Round to even numbers — required for yuv420p.
-let W = OW, H = OH, padX = 0, padY = 0;
+// padX/padY place the page; the window (title bar + page) starts at winY.
+let W = OW, H = OH, padX = 0, padY = 0, winY = 0;
 if (FRAME) {
-    W = OW - 2 * FRAME.padding; H = OH - 2 * FRAME.padding;
+    W = OW - 2 * FRAME.padding; H = OH - 2 * FRAME.padding - TB;
     W -= W % 2; H -= H % 2;
-    padX = (OW - W) / 2; padY = (OH - H) / 2;
+    padX = (OW - W) / 2; winY = Math.floor((OH - H - TB) / 2); padY = winY + TB;
 }
 
 const isLocalImage = (bg) => !/^(linear-gradient|radial-gradient|conic-gradient|repeating-|url\(|#|rgb|hsl|var\()/i.test(bg.trim())
     && /\.(png|jpe?g|webp|avif|gif)$/i.test(bg.trim());
 
-/** SVG path for a rounded rect, for use inside an evenodd clip-path(). */
-function roundedRectPath(x, y, w, h, r) {
-    if (r <= 0) {return `M${x} ${y} H${x + w} V${y + h} H${x} Z`;}
-    return `M${x + r} ${y} H${x + w - r} A${r} ${r} 0 0 1 ${x + w} ${y + r} V${y + h - r} `
+/** SVG path for a rounded rect, for use inside an evenodd clip-path().
+ * `rt` is the top corners' radius (0 under a title bar). */
+function roundedRectPath(x, y, w, h, r, rt = r) {
+    if (r <= 0 && rt <= 0) {return `M${x} ${y} H${x + w} V${y + h} H${x} Z`;}
+    return `M${x + rt} ${y} H${x + w - rt} A${rt} ${rt} 0 0 1 ${x + w} ${y + rt} V${y + h - r} `
         + `A${r} ${r} 0 0 1 ${x + w - r} ${y + h} H${x + r} A${r} ${r} 0 0 1 ${x} ${y + h - r} `
-        + `V${y + r} A${r} ${r} 0 0 1 ${x + r} ${y} Z`;
+        + `V${y + rt} A${rt} ${rt} 0 0 1 ${x + rt} ${y} Z`;
 }
 
 /** Render the OWxOH plate once: background with a transparent rounded hole at
@@ -124,15 +132,23 @@ async function renderPlate(browser) {
         ? `url("${pathToFileURL(path.resolve(background)).href}") center / cover no-repeat`
         : background;
     const outer = `M0 0 H${OW} V${OH} H0 Z`;
-    const hole = roundedRectPath(padX, padY, W, H, radius);
+    // Under a title bar the hole is only the page (square top): the opaque
+    // background behind the bar's rounded corners keeps the page from leaking.
+    const hole = roundedRectPath(padX, padY, W, H, radius, TB ? 0 : radius);
     const clip = `path(evenodd, "${outer} ${hole}")`;
     const html = `<!doctype html><html><head><meta charset="utf-8"><style>
         html,body{margin:0;padding:0;background:transparent;overflow:hidden;}
         .bg{position:absolute;inset:0;width:${OW}px;height:${OH}px;background:${bgCss};
             clip-path:${clip};}
-        .shadow{position:absolute;left:${padX}px;top:${padY}px;width:${W}px;height:${H}px;
+        .shadow{position:absolute;left:${padX}px;top:${winY}px;width:${W}px;height:${H + TB}px;
             border-radius:${radius}px;box-shadow:${shadowCss};}
-    </style></head><body><div class="bg"></div>${shadowCss === "none" ? "" : '<div class="shadow"></div>'}</body></html>`;
+        .bar{position:absolute;left:${padX}px;top:${winY}px;width:${W}px;height:${TB}px;box-sizing:border-box;
+            background:#e9e9eb;border-bottom:1px solid #d1d1d6;border-radius:${radius}px ${radius}px 0 0;
+            display:flex;align-items:center;gap:8px;padding-left:14px;}
+        .bar i{width:12px;height:12px;border-radius:50%;}
+    </style></head><body><div class="bg"></div>${shadowCss === "none" ? "" : '<div class="shadow"></div>'}${TB
+        ? '<div class="bar"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>'
+        : ""}</body></html>`;
     const plate = await browser.newPage({ viewport: { width: OW, height: OH } });
     await plate.setContent(html, { waitUntil: "networkidle" });
     const buf = await plate.screenshot({ omitBackground: true });

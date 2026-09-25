@@ -105,7 +105,7 @@ demo-reel drives your **real app** in headless Chromium on a **virtual clock**. 
 
 - 🖱️ **A cursor people can follow** — arrow, macOS, hand, I-beam or dot (or `auto`: follows the page), with a halo and a click effect
 - 🔍 **Smooth zoom** — ease onto what matters, the camera follows the cursor, text stays crisp (re-rendered, not upscaled; or `render: 2` for a 2× supersampled frame whose glyphs never re-render mid-zoom); a few gentle auto-zooms by default
-- 🖼️ **Styled frame** — drop the page in a rounded window with a soft shadow, inset on a wallpaper or gradient (`frame: true` or `{ background, padding, radius, shadow }`); one plate image, zero per-frame cost
+- 🖼️ **Styled frame** — drop the page in a rounded window with a soft shadow, inset on a wallpaper or gradient (`frame: true` or `{ background, padding, radius, shadow, titlebar: "mac" }`); one plate image, zero per-frame cost
 - 🖍️ **Highlighters** — box, circle, spotlight, underline, marker
 - 🏷️ **Callouts and cards** — a labelled pill with a leader line on any element; full-frame title and end cards that fade on the virtual clock
 - 💬 **Captions and badges** that survive page navigations (`BEFORE` / `AFTER`, `NEW`…), plus frame-exact `.srt` / `.vtt` subtitles
