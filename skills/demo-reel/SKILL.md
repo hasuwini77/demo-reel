@@ -56,10 +56,10 @@ export default {
 
 | Call | Does |
 |---|---|
-| `d.open(url, { settle })` | Navigate, let the page settle (unrecorded, default 2500 ms). |
+| `d.open(url, { settle, prewarm })` | Navigate, let the page settle (unrecorded, default 2500 ms), wait for fonts, load + decode every image; `prewarm` (default on) scrolls to the bottom and back unrecorded so lazy content is in before the first recorded scroll. |
 | `d.hold(ms)` | Record the page as it is. |
 | `d.settle(ms)` | Advance time **without** recording — skip loading states, lazy chunks, layout animations you don't want to show. |
-| `d.move(target, { ms })` / `d.hover` | Glide the cursor (eased) to a target. |
+| `d.move(target, { ms })` / `d.hover` | Glide the cursor to a target. Without `ms` the duration follows the distance (320–1100 ms); spring-eased, slightly arced, motion-blurred. |
 | `d.click(target, { ms, button })` | Move, click with a ripple. `button: "right"` for context menus. |
 | `d.doubleClick(target)` | Double click. |
 | `d.type(text, { delay })` | Type one key at a time (default 90 ms/key). |
@@ -71,7 +71,7 @@ export default {
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
 | `d.page`, `d.point(target)`, `d.width`, `d.height` | Escape hatches. |
 
-**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`.
+**Theme** (all optional): `accent` (one colour for halo, click effect and highlights), `cursorStyle` (`arrow` · `mac` · `hand` · `ibeam` · `dot` · `auto` = hand over links/buttons, I-beam over text fields), `cursorSize` (34), `halo` (true), `haloStyle` (`fill` · `ring` · `glow`), `haloSize`, `haloFill`, `haloStroke`, `clickStyle` (`ripple` · `ring` · `pulse` · `none`), `caret` (true: the text caret is drawn on the virtual clock — solid while typing, then a steady blink; `false` keeps Chromium's, which flickers at random in the video), `cursorMotion` (`{ spring, arc, blur }`, all on; `false` turns all off — cubic ease, straight line, no blur), `autoZoom` (on by default; `false` turns it off, or `{ scale, ms, gap, dwell, minHold, clicks }` — defaults 1.35, 1400, 10000, 4000, 1500, false), `captionPosition`, `captionSize`, `badgeTop`, `font`.
 
 **Frame**: `frame: true` sits the page in a rounded window with a soft shadow, inset on a wallpaper/gradient — omit it and output is unchanged. It costs nothing per frame (one plate image, composited by ffmpeg), and pairs well with zoom — the window stays put while the camera moves inside it.
 
@@ -107,7 +107,7 @@ await d.click(node("Server A"));
 - **Show outcomes, not clicks.** Hold 1–2 s on every result; cut loading with `d.settle`.
 - **Before/after**: record two scenarios with the same story and steps, badge `BEFORE`/`AFTER` (red/green), and keep them separate files plus an optional concatenation.
 - **Hero moments** (a landing page, an animation): give them 5–10 s — viewers need a moment to take it in.
-- **Keep the cursor calm**: 600–900 ms per move, park it away from content while holding.
+- **Keep the cursor calm**: leave `ms` off — moves are timed by distance — and park it away from content while holding.
 - **Zoom sparingly**: auto-zoom covers typing (and click-then-hold with `clicks: true`); add a manual `d.zoom` only where it misses (it then takes over). One or two zooms per minute, 1.3–1.5×, on the moment that matters (a value changing, small text). Zoom out before a big move across the screen. A highlight is often enough.
 - Real timers keep running while frames render (~50–300 ms real time per frame), so timer-driven UI — toasts, debounced search, auto-dismissing tooltips — may disappear sooner in the video than in real life. Trigger them right before you want them on screen, or hold less.
 
