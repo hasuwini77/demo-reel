@@ -10,7 +10,7 @@
 // re-synthesizes.
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 
 const DEFAULTS = {
@@ -113,15 +113,20 @@ export async function createVoice(cfg, { cacheDir = path.resolve(".demo-reel-cac
     return {
         async synth(text) {
             const id = createHash("sha1").update([provider, o.voice, o.model ?? "", o.speed, text].join("|")).digest("hex");
-            const file = path.join(cacheDir, `${id}.${o.ext}`);
+            const file = path.join(cacheDir, `${id}.wav`);
             const short = text.length > 48 ? `${text.slice(0, 47)}…` : text;
             if (existsSync(file)) {
                 console.log(`voice: cache hit  "${short}"`);
             } else {
                 const t0 = Date.now();
-                const tmp = `${file}.part.${o.ext}`;
-                const buf = await synthesize(text, tmp);
-                if (buf) {writeFileSync(tmp, buf);}
+                const raw = `${file}.raw.${o.ext}`, tmp = `${file}.part.wav`;
+                const buf = await synthesize(text, raw);
+                if (buf) {writeFileSync(raw, buf);}
+                // Clips open with silence (Kokoro: 0.33–0.39 s): trim it, so speech
+                // starts on the frame the line was said and `dur` is honest.
+                await run("ffmpeg", ["-y", "-loglevel", "error", "-i", raw,
+                    "-af", "silenceremove=start_periods=1:start_threshold=-50dB", tmp]);
+                unlinkSync(raw);
                 renameSync(tmp, file);
                 console.log(`voice: ${provider} "${short}" (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
             }
