@@ -1,6 +1,6 @@
 ---
 name: demo-reel
-description: Record a smooth, frame-exact 60 fps demo video of any web app from a short script — scripted cursor (arrow, hand, dot…) with a halo, click effects, smooth zooms, highlighters (box, circle, spotlight, marker), captions and a corner badge, rendered on a virtual clock so it never stutters, encoded to an MP4 that loops in PowerPoint, Keynote or on the web. Use when the user wants a demo video, product walkthrough, screen recording, feature tour, before/after comparison video, a clip for a slide deck or landing page, or says "record the app", "make a video of", "screen capture", "show how it feels", "demo reel". Also for turning a Playwright flow into a video or making an existing recording smoother (60 fps).
+description: Record a smooth, frame-exact 60 fps demo video of any web app from a short script — scripted cursor (arrow, hand, dot…) with a halo, click effects, smooth zooms, highlighters (box, circle, spotlight, marker), callouts, title and end cards, captions and a corner badge, rendered on a virtual clock so it never stutters, encoded to an MP4 that loops in PowerPoint, Keynote or on the web. Use when the user wants a demo video, product walkthrough, screen recording, feature tour, before/after comparison video, a clip for a slide deck or landing page, or says "record the app", "make a video of", "screen capture", "show how it feels", "demo reel". Also for turning a Playwright flow into a video or making an existing recording smoother (60 fps).
 ---
 
 # demo-reel
@@ -47,8 +47,10 @@ export default {
     await d.type("Stockholm");                  // human-speed typing
     await d.press("Enter");
     await d.highlight(".results", { style: "box", ms: 1500 });
+    await d.callout(".filters", "Filters live here", { ms: 1500 });
     await d.zoom(null);                         // ease back out
     await d.scroll(600);                        // smooth wheel scroll
+    await d.card({ title: "Try it", subtitle: "example.com" }); // title / end card
     await d.step("optional part", async () => { /* failures are logged, recording continues */ });
   },
 };
@@ -67,6 +69,8 @@ export default {
 | `d.scroll(dy, { ms })` | Smooth wheel scroll. |
 | `d.zoom(target, { scale, ms, follow })` | Ease the camera onto a target (boxes are framed to fit, max 1.8×), then follow the cursor. Non-blocking — plays over the next moves/holds. `d.zoom(null)` eases out. |
 | `d.highlight(target, { style, color, pad, ms })` | Mark a target: `box`, `circle`, `spotlight`, `underline`, `marker`. Clears after `ms`, or all at once with `d.highlight(null)`. |
+| `d.callout(target, text, { side, color, ms })` | Label a target: a caption-style pill beside it, a leader line and a dot on its edge. `side` `auto` (the side with the most room) · `top` · `right` · `bottom` · `left`. Zooms with the page. Clears after `ms`, or with `d.callout(null)`. |
+| `d.card({ title, subtitle, ms, bg, align })` | Full-frame title or end card over the page (not zoomed): 350 ms fade in, `ms` shown (2500), 350 ms fade out, cursor hidden. `bg` any CSS background (`#0f172a`), `align` `center` · `left`. |
 | `d.caption(text)` / `d.badge(text, color)` / `d.cursor(bool \| style)` | Overlay state; survives full page navigations. `d.cursor("hand")` switches shape mid-take. |
 | `d.say(text, { wait })` | Voice-over from this frame (needs `voice`, see Voice-over). Returns `{ at, dur }` at once; `wait: true` holds until the clip ends. |
 | `d.step(name, fn)` | Named step; errors are logged, not fatal. |
