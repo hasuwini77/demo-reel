@@ -328,14 +328,17 @@ function aimOut(ms = 1000) {
 }
 
 // ---------------------------------------------------------------- auto zoom
-// A few gentle zooms without asking: when typing starts, and (opt-in, `clicks`)
-// on a click in the page body followed by a long hold — opt-in because a click's
-// result often appears elsewhere (a side panel), off the zoomed frame. Rare (one per `gap`), shallow and slow, and
-// out again after `dwell` or before a long cursor move, so it never feels busy.
-// Clicks near the edges (toolbars, nav) don't zoom: their result shows elsewhere.
+// A few gentle zooms without asking: when typing starts, and on a click in the
+// page body followed by a long hold. `clicks: "smart"` (default) zooms only when
+// the click's result appears near it: what changed in the page within 300 ms,
+// together with the click, must sit in the body region and cover < 35 % of the
+// view — a side panel opening at the edge, a new page or nothing visible: no zoom.
+// `clicks: true` always zooms onto the click, `false` never. Rare (one per `gap`),
+// shallow and slow, and out again after `dwell` or before a long cursor move, so
+// it never feels busy. Clicks near the edges (toolbars, nav) don't zoom.
 // A manual d.zoom() hands the camera to the scenario for the rest of the take.
 const AUTO = theme.autoZoom === false ? null : {
-    scale: 1.35, ms: 1400, gap: 10000, dwell: 4000, minHold: 1500, clicks: false,
+    scale: 1.35, ms: 1400, gap: 10000, dwell: 4000, minHold: 1500, clicks: "smart",
     ...(typeof theme.autoZoom === "object" ? theme.autoZoom : {}),
 };
 const auto = { on: false, at: -Infinity, until: 0, typing: false, click: null, manual: false };
@@ -354,6 +357,19 @@ function autoOut() {
 }
 
 const inBody = (p) => p.x > W * 0.15 && p.x < W * 0.85 && p.y > H * 0.12 && p.y < H * 0.88;
+const SMART_MS = 300;
+
+/** Smart click-zoom target: the click plus what changed right after it, if that
+ * sits in the body and is small enough to be worth a zoom; else null. */
+async function clickResult(c) {
+    const box = c.vt == null ? null
+        : await page.evaluate(([a, b]) => window.__demo?.changesSince(a, b), [c.vt, c.vt + SMART_MS]).catch(() => null);
+    if (!box) {return null;}
+    const x0 = Math.min(box.x, c.x), y0 = Math.min(box.y, c.y);
+    const r = { x: x0, y: y0, width: Math.max(box.x + box.width, c.x) - x0, height: Math.max(box.y + box.height, c.y) - y0 };
+    const ok = inBody(r) && inBody({ x: r.x + r.width, y: r.y + r.height }) && r.width * r.height < 0.35 * W * H;
+    return ok ? r : null;
+}
 
 async function applyCamera(scroll) {
     const { x, y, z } = state.cam;
@@ -473,9 +489,18 @@ const d = {
 
     /** Record `ms` of the page as it is (page time: under d.speed(k), ms/k of video). */
     async hold(ms) {
-        if (auto.click && AUTO?.clicks && ms >= AUTO.minHold && inBody(auto.click)) {autoIn({ ...auto.click, width: 0, height: 0 });}
+        const c = auto.click;
         auto.click = null;
-        for (let i = 0; i < Math.round(ms / (DT * speed)); i++) {await tick(DT, true);}
+        let n = Math.round(ms / (DT * speed));
+        if (c && AUTO?.clicks && ms >= AUTO.minHold && inBody(c)) {
+            if (AUTO.clicks !== "smart") {autoIn({ ...c, width: 0, height: 0 });} else {
+                // Let the result appear first (page time), then zoom only if it is near.
+                for (; n > 0 && clock - c.t < SMART_MS; n--) {await tick(DT, true);}
+                const r = await clickResult(c);
+                if (r) {autoIn(r);}
+            }
+        }
+        for (let i = 0; i < n; i++) {await tick(DT, true);}
     },
     /** Fast-forward: each recorded frame advances the page by DT·k. d.speed(1) resets. */
     speed(k = 1) { speed = Math.max(Number(k) || 1, 1e-3); },
@@ -547,12 +572,13 @@ const d = {
         state.clickSeq++;
         sound("click");
         state.pressed = true;
+        const t = clock, vt = AUTO?.clicks === "smart" ? await page.evaluate(() => window.__demo?.now()).catch(() => null) : null;
         await page.mouse.down({ button });
         await tick(DT, true); await tick(DT, true);
         await page.mouse.up({ button });
         state.pressed = false;
         await tick(DT, true);
-        auto.click = { x: state.x, y: state.y };
+        auto.click = { x: state.x, y: state.y, vt, t };
     },
     async doubleClick(target, opts = {}) {
         await d.click(target, opts);
