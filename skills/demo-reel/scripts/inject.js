@@ -111,6 +111,8 @@
           padding: 14px 26px; border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.25);
           opacity: 0; transition: opacity .35s ease; }
         #__demo-overlay .cap.on { opacity: 1; }
+        #__demo-overlay .cap .word { color: rgba(255,255,255,.4); transition: color .12s; }
+        #__demo-overlay .cap .word.on { color: #fff; }
         ${t.caret === false ? "" : `input, textarea, [contenteditable] { caret-color: transparent !important; }`}
         #__demo-overlay .caret { position: absolute; width: 1px; display: none; }
         #__demo-overlay .mirror { position: absolute; left: -99999px; top: 0; visibility: hidden; border-style: solid; overflow-wrap: break-word; }
@@ -247,7 +249,17 @@
       Object.assign(u.ptr.style, { left: -hx * k + "px", top: -hy * k + "px", transformOrigin: `${hx * k}px ${hy * k}px` });
     }
     motionBlur(u, s);
-    if (s.caption) { if (u.cap.textContent !== s.caption) u.cap.textContent = s.caption; u.cap.classList.add("on"); }
+    if (s.caption) {
+      if (u.cap.textContent !== s.caption) {
+        // Karaoke: one span per word, lit as the recorder's word times pass (capLit).
+        if (s.theme.captionStyle === "karaoke") {
+          u.cap.replaceChildren(...s.caption.split(/(\s+)/).map((p) => /\S/.test(p)
+            ? Object.assign(document.createElement("span"), { className: "word", textContent: p }) : p));
+        } else u.cap.textContent = s.caption;
+      }
+      u.cap.querySelectorAll(".word").forEach((w, i) => w.classList.toggle("on", s.capLit < 0 || i < s.capLit));
+      u.cap.classList.add("on");
+    }
     else u.cap.classList.remove("on");
     if (s.badge) { u.badge.style.display = "block"; u.badge.textContent = s.badge.text; u.badge.style.background = s.badge.color; }
     else u.badge.style.display = "none";

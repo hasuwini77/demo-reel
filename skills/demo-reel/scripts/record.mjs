@@ -182,6 +182,9 @@ let hlSeq = 0;
 const cues = [];          // voice clips: { at (ms), file, dur (ms) }
 let sayQueue = Promise.resolve();
 const subs = [];          // captions: { text, start, end } in ms, frame-exact
+// Karaoke captions: word spans (absolute ms) of the spoken caption, lit as they pass.
+const KARAOKE = theme.captionStyle === "karaoke";
+let karaoke = null, karaokeJob = null;
 
 // ---------------------------------------------------------------- zoom camera
 // Center (viewport px) and zoom, each chasing its target on a critically damped
@@ -291,6 +294,8 @@ async function tick(dt, capture) {
     }
     if (capture && auto.on && !auto.typing && now() > auto.until) {autoOut();}
     if (capture) {stepCamera(dt);}
+    if (capture && karaokeJob) { await karaokeJob.catch(() => {}); karaokeJob = null; }   // word times before the frame
+    state.capLit = KARAOKE && karaoke?.text === state.caption ? karaoke.words.filter((w) => w.start <= now()).length : -1;
     let scroll = [0, 0];
     for (let attempt = 0; attempt < 3; attempt++) {
         try {
@@ -472,8 +477,9 @@ const d = {
     say(text, { wait = false } = {}) {
         if (!VOICE) {throw new Error("demo-reel: d.say needs `voice: { provider }` in the scenario");}
         const at0 = now();
+        const lit = KARAOKE && state.caption === text;
         const job = sayQueue.then(async () => {
-            const { file, dur } = await VOICE.synth(text);
+            const { file, dur, words } = await VOICE.synth(text);
             const prev = cues.at(-1);
             let at = at0;
             if (prev && at < prev.at + prev.dur + 150) {
@@ -481,9 +487,11 @@ const d = {
                 console.warn(`voice: "${text.slice(0, 40)}" overlaps the previous clip, moved ${Math.round(at - at0)} ms later`);
             }
             cues.push({ at, file, dur });
+            if (lit) {karaoke = { text, words: words.map((w) => ({ start: at + w.start, end: at + w.end })) };}
             return { at, dur };
         });
         sayQueue = job.catch(() => {});
+        if (lit) {karaokeJob = job;}
         if (!wait) {return job;}
         return job.then(async (c) => { await d.hold(Math.max(0, c.at + c.dur + 200 - now())); return c; });
     },
