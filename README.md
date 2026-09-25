@@ -164,7 +164,7 @@ scenario.mjs ──► Playwright (headless Chromium)
                                                            ffmpeg (H.264, 60 fps) ──► demo.mp4
 ```
 
-Timers (`setTimeout`) intentionally stay real: faking them makes zero-delay loader and scheduler loops spin forever — which is also why Playwright's built-in fake clock can hang on WebGL-heavy pages.
+Timers (`setTimeout`) stay real by default: faking them all makes zero-delay loader and scheduler loops spin forever — which is also why Playwright's built-in fake clock can hang on WebGL-heavy pages. `clock: "hybrid"` (or `--clock hybrid`) is the middle ground: timers of 16 ms or more and `behavior: "smooth"` scrolls run on the virtual clock, shorter delays stay real — so a 3 s toast lasts exactly 3 s of video.
 
 ## Other agents
 

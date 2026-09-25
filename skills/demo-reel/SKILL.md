@@ -11,9 +11,11 @@ Turn a scripted walk through a web app into a video that looks like a polished s
 
 A normal screen recording captures frames when the browser happens to paint; on a slow machine (or software WebGL) that is ~10–15 fps and it stutters. demo-reel instead injects a **virtual clock** (`scripts/inject.js`): `requestAnimationFrame`, `performance.now` and `Date` only advance when the recorder says so, and CSS/Web animations are stepped via `document.getAnimations()`. Each frame is advanced exactly 1/fps, screenshotted, and piped into ffmpeg. However long a frame takes to render, the result plays back perfectly smooth.
 
-Timers (`setTimeout`/`setInterval`) are deliberately left real — faking them makes zero-delay timer chains in loaders and schedulers spin forever (this is why Playwright's own `page.clock` hangs on many WebGL pages).
+Timers (`setTimeout`/`setInterval`) are left real by default — faking them all makes zero-delay timer chains in loaders and schedulers spin forever (this is why Playwright's own `page.clock` hangs on many WebGL pages).
 
-The compositor still runs on real time: image decode, tile raster, GIFs and `scroll-behavior: smooth`. `--capture beginframe` (headless only) puts it on the virtual clock too: every frame is drawn on demand by `HeadlessExperimental.beginFrame` at the frame's virtual time, with raster and decode finished before it is captured. It's opt-in because in the current headless shell, animated GIF/APNG/WebP stay on their first frame until something repaints them, and smooth `scrollIntoView`/`scroll-behavior: smooth` jump in one frame instead of animating. Try it on pages with none of those when a zoom shows half-rastered tiles. `d.scroll` stays smooth in both modes.
+**Hybrid clock** (opt-in: `clock: "hybrid"` in the scenario, or `--clock hybrid`): timers of **16 ms or more** wait on the virtual clock and fire, in order, when a frame (or a `d.settle` step) reaches them; intervals re-arm. Shorter delays, promises, `queueMicrotask` and `MessageChannel` stay real, so zero-delay chains still can't spin. A 3 s toast is then on screen for exactly 3 s of video (180 frames at 60 fps). It also turns `behavior: "smooth"` in `scrollTo`/`scrollBy`/`scroll`/`scrollIntoView` into a 400 ms eased scroll stepped per frame. Virtual timers only move while the recorder ticks: to wait for timer-driven UI (a debounced search), use `d.settle`/`d.hold`, not Playwright's `waitForSelector`.
+
+The compositor still runs on real time: image decode, tile raster, GIFs and `scroll-behavior: smooth`. `--capture beginframe` (headless only) puts it on the virtual clock too: every frame is drawn on demand by `HeadlessExperimental.beginFrame` at the frame's virtual time, with raster and decode finished before it is captured. It's opt-in because in the current headless shell, animated GIF/APNG/WebP stay on their first frame until something repaints them, and smooth `scrollIntoView`/`scroll-behavior: smooth` jump in one frame instead of animating (with the hybrid clock, script-requested `behavior: "smooth"` scrolls animate again; CSS `scroll-behavior: smooth` — anchor links, `behavior: "auto"` — still jumps). Try it on pages with none of those when a zoom shows half-rastered tiles. `d.scroll` stays smooth in both modes.
 
 ## Requirements
 
@@ -37,6 +39,7 @@ export default {
   fps: 60,
   theme: { captionPosition: "bottom", accent: "#6366f1", cursorStyle: "auto" }, // optional, see Theme
   frame: true,                 // optional — rounded window + shadow on a background, see Frame
+  clock: "hybrid",             // optional — timers >= 16 ms and smooth scrolls on the virtual clock
   async run(d) {
     await d.open("http://localhost:4173/");     // navigate + settle (not recorded)
     d.badge("NEW", "#15803d");                  // corner badge (null hides)
@@ -157,7 +160,7 @@ audio: {
 - **Hero moments** (a landing page, an animation): give them 5–10 s — viewers need a moment to take it in.
 - **Keep the cursor calm**: leave `ms` off — moves are timed by distance — and park it away from content while holding.
 - **Zoom sparingly**: auto-zoom covers typing (and click-then-hold with `clicks: true`); add a manual `d.zoom` only where it misses (it then takes over). One or two zooms per minute, 1.3–1.5×, on the moment that matters (a value changing, small text). Zoom out before a big move across the screen. A highlight is often enough.
-- Real timers keep running while frames render (~50–300 ms real time per frame), so timer-driven UI — toasts, debounced search, auto-dismissing tooltips — may disappear sooner in the video than in real life. Trigger them right before you want them on screen, or hold less.
+- Real timers keep running while frames render (~50–300 ms real time per frame), so timer-driven UI — toasts, debounced search, auto-dismissing tooltips — may disappear sooner in the video than in real life. Record with `clock: "hybrid"` to keep their real duration, or trigger them right before you want them on screen.
 
 ## Using the video
 
