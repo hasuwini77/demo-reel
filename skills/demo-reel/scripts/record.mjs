@@ -175,7 +175,7 @@ const ffDone = new Promise((r) => ff.on("close", r));
 // ---------------------------------------------------------------- state + frame loop
 const state = {
     x: W / 2, y: H * 0.62, cursor: true, cursorStyle: theme.cursorStyle, pressed: false,
-    caption: null, badge: null, clickSeq: 0, highlights: [], cam: { x: 0, y: 0, z: 1 }, theme,
+    caption: null, badge: null, card: null, clickSeq: 0, highlights: [], cam: { x: 0, y: 0, z: 1 }, theme,
 };
 let frames = 0;
 let hlSeq = 0;
@@ -513,6 +513,36 @@ const d = {
             id: ++hlSeq, style, color, pad, x: r.x, y: r.y, w: r.width, h: r.height,
             until: ms ? frames * DT + ms : Infinity,
         }];
+    },
+    /**
+     * Label a target: a caption-style pill beside it, joined by a leader line to a
+     * dot on its edge. `side` "auto" picks the side with the most room. Clears
+     * after `ms`, or with `d.callout(null)`; zooms with the page like highlights.
+     */
+    async callout(target, text, { side = "auto", color = theme.haloStroke, ms } = {}) {
+        if (target == null) { state.highlights = state.highlights.filter((h) => h.style !== "callout"); return; }
+        const r = await rect(target);
+        if (side === "auto") {
+            const room = { right: W - r.x - r.width, left: r.x, bottom: H - r.y - r.height, top: r.y };
+            side = Object.keys(room).reduce((a, b) => (room[b] > room[a] ? b : a));
+        }
+        state.highlights = [...state.highlights, {
+            id: ++hlSeq, style: "callout", text, side, color, pad: 0, x: r.x, y: r.y, w: r.width, h: r.height,
+            until: ms ? frames * DT + ms : Infinity,
+        }];
+    },
+    /**
+     * Full-frame title / end card over the page (not zoomed): fades in, stays
+     * `ms`, fades out, 350 ms each way on the virtual clock. Cursor hidden meanwhile.
+     */
+    async card({ title, subtitle, ms = 2500, bg = "#0f172a", align = "center" } = {}) {
+        const cursor = state.cursor;
+        state.cursor = false;
+        state.card = { title, subtitle, bg, align };
+        await d.hold(350 + ms);
+        state.card = null;
+        await d.hold(350);
+        state.cursor = cursor;
     },
     /** Run a named step; a failure is logged and the recording continues. */
     async step(name, fn) {
