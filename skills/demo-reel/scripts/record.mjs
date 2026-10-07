@@ -672,7 +672,9 @@ const d = {
         if (lit) {karaokeJob = job;}
         if (!wait) {return job;}
         return job.then(async (c) => {
-            for (let i = 0; i < Math.round(Math.max(0, c.at + c.dur + 200 - now()) / DT); i++) {await tick(DT, true);}
+            // Count the frames once: re-reading now() in the loop bound stopped it halfway.
+            const n = Math.round(Math.max(0, c.at + c.dur + 200 - now()) / DT);
+            for (let i = 0; i < n; i++) {await tick(DT, true);}
             return c;
         });
     },
